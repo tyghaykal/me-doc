@@ -1,0 +1,44 @@
+[package]
+name = "me-doc-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+redis = { version = "0.25", features = ["tokio-comp"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+thiserror = "1"
+anyhow = "1"
+argon2 = "0.5"
+jsonwebtoken = "9"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+tower-cookies = "0.10"
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "smtp-transport", "builder"] }
+aws-config = "1"
+aws-sdk-s3 = "1"
+tower_governor = "0.3"
+# yrs-axum was dropped: its only releases (0.8.x) pin yrs 0.18 + axum 0.8, which
+# collides with this app's axum 0.7 and the export module's yrs 0.27. We keep
+# yrs 0.27 and drive the y-sync protocol via yrs's own `sync::DefaultProtocol`
+# (see src/collab/mod.rs), so only the websocket fan-out is bespoke.
+yrs = { version = "0.27", features = ["sync"] }
+dashmap = "6"
+futures-util = { version = "0.3", features = ["sink"] }
+docx-rs = "0.4"
+genpdf = "0.2"
+pulldown-cmark = { version = "0.13", default-features = false }
+
+[profile.release]
+opt-level = 2
