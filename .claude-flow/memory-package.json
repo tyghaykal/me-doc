@@ -1,6 +1,6 @@
 {
-  "distPath": "/home/haykal/.npm/_npx/2ed56890c96f58f7/node_modules/@claude-flow/cli/node_modules/@claude-flow/memory/dist/index.js",
+  "distPath": "/home/haykal/.npm/_npx/2ed56890c96f58f7/node_modules/@claude-flow/memory/dist/index.js",
   "version": "3.0.0-alpha.21",
-  "resolvedBy": "init",
-  "resolvedAt": "2026-07-17T07:24:26.269Z"
+  "resolvedBy": "upgrade",
+  "resolvedAt": "2026-07-18T07:17:36.866Z"
 }
