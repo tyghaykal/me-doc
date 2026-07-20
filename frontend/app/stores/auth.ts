@@ -72,7 +72,7 @@ export const useAuthStore = defineStore('auth', () => {
     // outside of a plugin/middleware/setup" instead of returning the event.
     const event = import.meta.server ? useRequestEvent() : undefined
 
-    const response = await $fetch.raw<{ access_token: string }>(`${useApiBase()}/auth/refresh`, {
+    const response = await $fetch.raw<AuthResponse>(`${useApiBase()}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
       headers,
@@ -81,7 +81,7 @@ export const useAuthStore = defineStore('auth', () => {
     const setCookie = response.headers.get('set-cookie')
     if (setCookie && event) appendResponseHeader(event, 'set-cookie', setCookie)
 
-    accessToken.value = response._data!.access_token
+    applySession(response._data!)
   }
 
   async function logout() {

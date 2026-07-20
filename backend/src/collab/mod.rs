@@ -33,6 +33,7 @@ use yrs::updates::encoder::Encode;
 use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 
 use crate::auth::{error::AuthError, jwt};
+use crate::sharing;
 use crate::AppState;
 
 /// Registry of active documents, keyed by page id. Becomes an `AppState` field.
@@ -66,6 +67,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct TokenQuery {
     token: Option<String>,
+    link: Option<String>,
 }
 
 async fn ws_handler(
@@ -79,22 +81,10 @@ async fn ws_handler(
     let token = q.token.ok_or(AuthError::InvalidToken)?;
     let claims = jwt::verify_access_token(&state.config.jwt_access_secret, &token)?;
 
-    // ponytail: workspace-membership check only (any member => full collab
-    // access). Fine-grained viewer/editor gating via sharing::resolve_role is a
-    // refinement, not needed to land realtime editing.
-    let ws_row: Option<(Uuid,)> = sqlx::query_as("select workspace_id from pages where id = $1")
-        .bind(page_id)
-        .fetch_optional(&state.db)
-        .await?;
-    let (workspace_id,) = ws_row.ok_or(AuthError::NotFound)?;
-    let member: Option<(Uuid,)> = sqlx::query_as(
-        "select user_id from workspace_members where workspace_id = $1 and user_id = $2",
-    )
-    .bind(workspace_id)
-    .bind(claims.sub)
-    .fetch_optional(&state.db)
-    .await?;
-    member.ok_or(AuthError::Forbidden)?;
+    // Same resolution as the REST endpoints (workspace membership, a direct
+    // page/workspace grant, or a `?link=` token) — any resolved role can join
+    // the room; viewer vs. editor isn't enforced at the CRDT layer yet.
+    sharing::resolve_role(&state.db, page_id, Some(claims.sub), q.link.as_deref()).await?;
 
     let room = join_room(&state, page_id).await?;
 

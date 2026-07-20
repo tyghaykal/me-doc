@@ -12,6 +12,7 @@ pub mod health;
 pub mod pages;
 pub mod sharing;
 pub mod storage;
+pub mod users;
 pub mod versions;
 pub mod workspaces;
 

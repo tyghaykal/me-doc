@@ -173,7 +173,7 @@ async fn login_verify(
     }))
 }
 
-async fn refresh(State(state): State<AppState>, cookies: Cookies) -> Result<Json<Value>, AuthError> {
+async fn refresh(State(state): State<AppState>, cookies: Cookies) -> Result<Json<AuthResponse>, AuthError> {
     let token = cookies
         .get("refresh_token")
         .map(|c| c.value().to_string())
@@ -182,7 +182,17 @@ async fn refresh(State(state): State<AppState>, cookies: Cookies) -> Result<Json
     let user_id = tokens::consume_refresh_token(&state.db, &token).await?;
     let access_token = issue_session(&state, &cookies, user_id).await?;
 
-    Ok(Json(json!({ "access_token": access_token })))
+    let (email,): (String,) = sqlx::query_as("select email from users where id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await?;
+    let workspace = fetch_first_workspace(&state.db, user_id).await?;
+
+    Ok(Json(AuthResponse {
+        access_token,
+        user: UserResponse { id: user_id, email },
+        workspace,
+    }))
 }
 
 async fn logout(State(state): State<AppState>, cookies: Cookies) -> Result<Json<Value>, AuthError> {

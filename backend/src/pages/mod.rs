@@ -12,6 +12,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::{error::AuthError, extractor::AuthenticatedUser};
+use crate::sharing::{PagePermission, Role};
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -67,8 +68,9 @@ pub fn router() -> Router<AppState> {
             get(list_pages).post(create_page),
         )
         .route("/workspaces/:workspace_id/pages/trash", get(list_trash))
-        .route("/pages/:id", patch(update_page).delete(delete_page))
+        .route("/pages/:id", get(get_page).patch(update_page).delete(delete_page))
         .route("/pages/:id/restore", patch(restore_page))
+        .route("/pages/:id/duplicate", post(duplicate_page))
         .route(
             "/pages/:id/content",
             get(get_page_content).put(put_page_content),
@@ -239,17 +241,70 @@ async fn delete_page(
     Ok(Json(serde_json::json!({ "message": "page archived" })))
 }
 
-async fn get_page_content(
+async fn duplicate_page(
     State(state): State<AppState>,
     user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, AuthError> {
+) -> Result<Json<Page>, AuthError> {
     let workspace_id = page_workspace(&state.db, id).await?;
     require_membership(&state.db, workspace_id, user.user_id).await?;
 
+    let source: Option<(Option<Uuid>, String)> =
+        sqlx::query_as("select parent_page_id, title from pages where id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
+    let (parent_page_id, title) = source.ok_or(AuthError::NotFound)?;
+
+    let new_title = format!("{title} (copy)");
+    let slug = slugify(&new_title);
+
+    let row: PageRow = sqlx::query_as(&format!(
+        "insert into pages (workspace_id, parent_page_id, title, slug, created_by)
+         values ($1, $2, $3, $4, $5)
+         returning {PAGE_COLUMNS}"
+    ))
+    .bind(workspace_id)
+    .bind(parent_page_id)
+    .bind(&new_title)
+    .bind(&slug)
+    .bind(user.user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let new_id = row.0;
+    sqlx::query(
+        "insert into page_content (page_id, yjs_state, plain_text)
+         select $2, yjs_state, plain_text from page_content where page_id = $1",
+    )
+    .bind(id)
+    .bind(new_id)
+    .execute(&state.db)
+    .await?;
+
+    Ok(Json(row.into()))
+}
+
+async fn get_page(
+    State(state): State<AppState>,
+    perm: PagePermission,
+) -> Result<Json<Page>, AuthError> {
+    let row: PageRow = sqlx::query_as(&format!("select {PAGE_COLUMNS} from pages where id = $1"))
+        .bind(perm.page_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AuthError::NotFound)?;
+
+    Ok(Json(row.into()))
+}
+
+async fn get_page_content(
+    State(state): State<AppState>,
+    perm: PagePermission,
+) -> Result<impl IntoResponse, AuthError> {
     let row: Option<(Vec<u8>,)> =
         sqlx::query_as("select yjs_state from page_content where page_id = $1")
-            .bind(id)
+            .bind(perm.page_id)
             .fetch_optional(&state.db)
             .await?;
 
@@ -262,19 +317,19 @@ async fn get_page_content(
 
 async fn put_page_content(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    let workspace_id = page_workspace(&state.db, id).await?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
 
     sqlx::query(
         "insert into page_content (page_id, yjs_state, updated_at)
          values ($1, $2, now())
          on conflict (page_id) do update set yjs_state = excluded.yjs_state, updated_at = now()",
     )
-    .bind(id)
+    .bind(perm.page_id)
     .bind(body.as_ref())
     .execute(&state.db)
     .await?;

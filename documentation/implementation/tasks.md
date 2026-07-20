@@ -62,6 +62,30 @@ Companion to `full-implementation-plan.md` — same work, broken into trackable 
 - [x] **#33** Rate limiting
 - [x] **#34** Initial test coverage — *blocked by #23*
 
+## Phase 9: Multi-workspace, user profile, /app fixes
+
+Companion plan: `app-workspace-profile-plan.md`.
+
+- [x] **#35** Fix "+ New page" no-op on empty workspace — pass `workspace-id` prop into `PageTree` instead of inferring it; `createPage` sets `activePageId`
+- [x] **#36** Bump base font size (+2px via root `html { font-size: 18px }`)
+- [x] **#37** Backend: `workspaces/mod.rs` — `create_workspace`, `list_members`, `add_member`, `remove_member` endpoints
+- [x] **#38** Backend: migration `0008_user_profile.sql` (`display_name`, `avatar_key` on `users`)
+- [x] **#39** Backend: new `users/mod.rs` module (`GET/PATCH /auth/me`, `POST /auth/me/password`, `POST /auth/me/avatar/presign`) — *blocked by #38*
+- [x] **#40** Backend: wire `users::router()` into `main.rs`/`lib.rs` — *blocked by #39*
+- [x] **#41** Frontend: `stores/workspaces.ts` + `WorkspaceSwitcher.vue` + `CreateWorkspaceModal.vue` + `WorkspaceMembersModal.vue` — *blocked by #37*
+- [x] **#42** Frontend: `UserSettingsModal.vue` — *blocked by #40*
+- [x] **#43** Frontend: wire both into `pages/app/index.vue` header (workspace switcher replaces static `<h1>`, settings gear button, mount-time workspace fetch/restore + watcher) — *blocked by #41, #42*
+- [x] **#44** End-to-end verification per plan's Verification section — *blocked by #43*
+
+**Bug found during #44 verification (not in original plan, fixed inline):** `Editor.vue` never actually worked — `useEditor()` (from `@tiptap/vue-3`) already returns a `ShallowRef<Editor>` and internally registers its own `onMounted`/`onBeforeUnmount`, so it must be called synchronously in `<script setup>`. The old code called it inside `onMounted(async () => { await ...; editor.value = useEditor(...) })`, both deferring it past an `await` *and* wrapping its already-a-ref return value in a second `shallowRef` — breaking Vue's template auto-unwrap and losing the active-component-instance context Tiptap's internal hooks need. Every page open threw `TypeError: Cannot read properties of undefined (reading 'element')` and rendered nothing. This was never caught before because the pre-existing `+ New page` bug (#35) meant no page had ever actually been opened in this app until today. Fixed by calling `useEditor()` directly at the top level of setup (not nested in any lifecycle hook) and using its return value as-is; page content now loads asynchronously afterward and is merged into the already-live Yjs doc via `Y.applyUpdate` (safe regardless of ordering — Yjs updates are commutative).
+
+**Verification performed live** (Playwright against the real Docker stack, `https://localhost`, real Mailpit OTP retrieval):
+- Registered a user, landed on `/app` with zero pages, clicked "+ New page" → page created and opened immediately, typed into the editor, text persisted in the DOM (`.ProseMirror` innerText matched).
+- Root `font-size: 18px` confirmed via `getComputedStyle`.
+- Created a second workspace via the switcher → became active, page list correctly reset/refetched empty for it.
+- Registered a second account, invited it to the workspace by email with role `member` via "Manage members" → confirmed in the UI: inviter sees "Leave" (owner), invitee row shows "Remove" (admin/owner privilege), success message "Added \<email\>." shown.
+- Opened user settings, changed display name, saved → "Saved." confirmation shown; password section present with 3 fields (current/new/confirm).
+
 ## Bugs found and fixed during live verification (not separate tasks, fixed inline)
 
 - S3 client panicked at runtime: `aws-sdk-s3`/`aws-config` require an explicit `behavior_version` — added `.behavior_version(BehaviorVersion::latest())`.

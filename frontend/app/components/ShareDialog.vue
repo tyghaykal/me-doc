@@ -51,8 +51,7 @@ async function generateLink() {
       `/pages/${props.pageId}/share/link`,
       { method: 'POST', body: { role: linkRole.value } },
     )
-    // ponytail: /app/pages/:id?link= is a guess — page-view route isn't built yet.
-    linkUrl.value = `${window.location.origin}/app/pages/${props.pageId}?link=${res.link_token}`
+    linkUrl.value = `${window.location.origin}/app/${props.pageId}?link=${res.link_token}`
   } catch (err: any) {
     linkError.value = errText(err, 'Failed to generate link.')
   } finally {

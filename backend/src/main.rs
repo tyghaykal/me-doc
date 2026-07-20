@@ -1,7 +1,7 @@
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::Method;
 use axum::{routing::get, Router};
-use me_doc_backend::{auth, collab, config, db, email::EmailClient, export, health, pages, sharing, storage, versions, workspaces, AppState};
+use me_doc_backend::{auth, collab, config, db, email::EmailClient, export, health, pages, sharing, storage, users, versions, workspaces, AppState};
 use redis::Client as RedisClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health::health))
-        .nest("/auth", auth::router())
+        .nest("/auth", auth::router().merge(users::router()))
         .nest("/workspaces", workspaces::router())
         .merge(pages::router())
         .merge(sharing::router())

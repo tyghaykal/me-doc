@@ -1,18 +1,34 @@
 <script setup lang="ts">
 import type { PageNode } from '~/stores/pages'
 
-const props = withDefaults(defineProps<{ nodes: PageNode[]; depth?: number }>(), {
+const props = withDefaults(defineProps<{ nodes: PageNode[]; workspaceId: string; depth?: number }>(), {
   depth: 0,
 })
 
 const pagesStore = usePagesStore()
 
-function workspaceId() {
-  return props.nodes[0]?.workspace_id ?? pagesStore.pages[0]?.workspace_id
-}
+const contextMenu = ref<{ x: number; y: number; node: PageNode } | null>(null)
 
 function select(node: PageNode) {
   pagesStore.activePageId = node.id
+}
+
+function openContextMenu(e: MouseEvent, node: PageNode) {
+  contextMenu.value = { x: e.clientX, y: e.clientY, node }
+}
+
+function duplicateNode() {
+  const node = contextMenu.value?.node
+  contextMenu.value = null
+  if (node) pagesStore.duplicatePage(node.id)
+}
+
+function deleteNode() {
+  const node = contextMenu.value?.node
+  contextMenu.value = null
+  if (node && window.confirm(`Delete "${node.title || 'Untitled'}"? This can be restored from trash later.`)) {
+    pagesStore.deletePage(node.id)
+  }
 }
 
 function onDragStart(e: DragEvent, node: PageNode) {
@@ -47,8 +63,7 @@ function addChild(parent: PageNode) {
 }
 
 function addTopLevel() {
-  const ws = workspaceId()
-  if (ws) pagesStore.createPage(ws, { title: 'Untitled' })
+  pagesStore.createPage(props.workspaceId, { title: 'Untitled' })
 }
 </script>
 
@@ -75,6 +90,7 @@ function addTopLevel() {
         :class="pagesStore.activePageId === node.id ? 'bg-slate-100 font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100' : ''"
         :style="{ paddingLeft: `${depth * 12 + 8}px` }"
         @click="select(node)"
+        @contextmenu.prevent="openContextMenu($event, node)"
         @dragstart="onDragStart($event, node)"
         @dragover.prevent
         @drop="onDropOnNode($event, node)"
@@ -89,7 +105,40 @@ function addTopLevel() {
         </button>
       </div>
 
-      <PageTree v-if="node.children.length" :nodes="node.children" :depth="depth + 1" />
+      <PageTree
+        v-if="node.children.length"
+        :nodes="node.children"
+        :workspace-id="workspaceId"
+        :depth="depth + 1"
+      />
     </li>
   </ul>
+
+  <Teleport to="body">
+    <template v-if="contextMenu">
+      <div class="fixed inset-0 z-40" @click="contextMenu = null" @contextmenu.prevent="contextMenu = null" />
+      <div
+        role="menu"
+        class="fixed z-50 w-40 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          @click="duplicateNode"
+        >
+          Duplicate
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-slate-50 dark:text-red-400 dark:hover:bg-slate-800"
+          @click="deleteNode"
+        >
+          Delete
+        </button>
+      </div>
+    </template>
+  </Teleport>
 </template>

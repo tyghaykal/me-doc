@@ -40,6 +40,12 @@ export const usePagesStore = defineStore('pages', () => {
     pages.value = await api<Page[]>(`/workspaces/${workspaceId}/pages`)
   }
 
+  // For a page shared with this user that isn't in their own workspace's
+  // list above (a link visit, or a page-level grant on a foreign workspace).
+  async function fetchPage(pageId: string, linkToken?: string | null) {
+    return api<Page>(`/pages/${pageId}`, { query: linkToken ? { link: linkToken } : undefined })
+  }
+
   async function createPage(
     workspaceId: string,
     opts: { title?: string; parentPageId?: string } = {},
@@ -49,6 +55,7 @@ export const usePagesStore = defineStore('pages', () => {
       body: { title: opts.title, parent_page_id: opts.parentPageId },
     })
     await fetchPages(workspaceId)
+    activePageId.value = page.id
     return page
   }
 
@@ -72,13 +79,23 @@ export const usePagesStore = defineStore('pages', () => {
     if (workspaceId) await fetchPages(workspaceId)
   }
 
+  async function duplicatePage(pageId: string) {
+    const workspaceId = pages.value.find((p) => p.id === pageId)?.workspace_id
+    const page = await api<Page>(`/pages/${pageId}/duplicate`, { method: 'POST' })
+    if (workspaceId) await fetchPages(workspaceId)
+    activePageId.value = page.id
+    return page
+  }
+
   return {
     pages,
     activePageId,
     pageTree,
     fetchPages,
+    fetchPage,
     createPage,
     updatePage,
     deletePage,
+    duplicatePage,
   }
 })
