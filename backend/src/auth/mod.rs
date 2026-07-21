@@ -18,12 +18,21 @@ use error::AuthError;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/refresh", post(refresh))
+        .route("/logout", post(logout))
+}
+
+/// Credential/OTP-guessable endpoints — kept on a separate, much stricter
+/// rate-limit bucket in main.rs than the rest of the API (see the comment
+/// there). `refresh`/`logout` don't belong here: both require an
+/// already-valid session (cookie/token), so they aren't brute-forceable the
+/// same way.
+pub fn sensitive_router() -> Router<AppState> {
+    Router::new()
         .route("/register", post(register))
         .route("/register/verify", post(register_verify))
         .route("/login", post(login))
         .route("/login/verify", post(login_verify))
-        .route("/refresh", post(refresh))
-        .route("/logout", post(logout))
 }
 
 #[derive(Deserialize)]
@@ -85,11 +94,23 @@ async fn register(
 
     let hash = password::hash_password(&body.password)?;
 
-    sqlx::query("insert into users (email, password_hash) values ($1, $2)")
-        .bind(&email)
-        .bind(&hash)
-        .execute(&state.db)
-        .await?;
+    let (user_id,): (Uuid,) =
+        sqlx::query_as("insert into users (email, password_hash) values ($1, $2) returning id")
+            .bind(&email)
+            .bind(&hash)
+            .fetch_one(&state.db)
+            .await?;
+
+    // Resolve any pages shared with this email before they had an account —
+    // see sharing::share_with_user's pending_email path.
+    sqlx::query(
+        "update permissions set principal_id = $1, pending_email = null
+         where principal_type = 'user' and principal_id is null and pending_email = $2",
+    )
+    .bind(user_id)
+    .bind(&email)
+    .execute(&state.db)
+    .await?;
 
     let code = otp::issue_otp(&state.redis, "register", &email, state.config.otp_ttl_seconds).await?;
     state.email.send_otp(&email, "register", &code).await?;

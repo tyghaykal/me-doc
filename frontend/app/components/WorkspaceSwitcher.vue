@@ -31,7 +31,7 @@ function openMembers() {
   <div class="relative">
     <button
       type="button"
-      class="flex items-center gap-1 rounded px-2 py-1 text-lg font-semibold text-slate-900 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
+      class="flex w-full items-center justify-between gap-1 rounded px-2 py-1 text-lg font-semibold text-neutral-900 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
       @click="open = !open"
     >
       {{ authStore.workspace?.name }}
@@ -44,26 +44,26 @@ function openMembers() {
       <div class="fixed inset-0 z-40" @click="open = false" />
       <div
         role="menu"
-        class="absolute left-0 z-50 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        class="absolute left-0 z-50 mt-1 w-full rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
       >
         <button
           v-for="ws in workspacesStore.list"
           :key="ws.id"
           type="button"
           role="menuitem"
-          class="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          class="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
           @click="select(ws)"
         >
           {{ ws.name }}
-          <span v-if="ws.id === authStore.workspace?.id" class="text-slate-400">✓</span>
+          <span v-if="ws.id === authStore.workspace?.id" class="text-neutral-400">✓</span>
         </button>
 
-        <div class="my-1 border-t border-slate-200 dark:border-slate-800" />
+        <div class="my-1 border-t border-neutral-200 dark:border-neutral-800" />
 
         <button
           type="button"
           role="menuitem"
-          class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          class="block w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
           @click="openCreate"
         >
           + New workspace
@@ -71,7 +71,7 @@ function openMembers() {
         <button
           type="button"
           role="menuitem"
-          class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          class="block w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
           @click="openMembers"
         >
           Manage members

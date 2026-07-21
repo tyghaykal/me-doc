@@ -13,6 +13,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::{error::AuthError, extractor::AuthenticatedUser};
+use crate::collab;
 use crate::pages::require_membership;
 use crate::AppState;
 
@@ -77,9 +78,7 @@ async fn restore_version(
             .await?;
     let (bytes,) = version.ok_or(AuthError::NotFound)?;
 
-    // Same upsert as put_page_content / collab's persist_bytes.
-    // ponytail: an open live collab room won't reflect this until clients
-    // reconnect (it holds its own in-memory doc) — acceptable, documented limitation.
+    // 1. Write restored bytes to page_content first.
     sqlx::query(
         "insert into page_content (page_id, yjs_state, updated_at)
          values ($1, $2, now())
@@ -89,6 +88,17 @@ async fn restore_version(
     .bind(&bytes)
     .execute(&state.db)
     .await?;
+
+    // Touch pages.updated_at so the topbar "Edited …" reflects the restore.
+    let _ = sqlx::query("update pages set updated_at = now() where id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await;
+
+    // 2. Drop any live collab room so reconnecting clients rebuild from DB.
+    //    The superseded room is deactivated so its flusher/disconnect cannot
+    //    overwrite the restored bytes with the pre-restore in-memory doc.
+    collab::invalidate_room(&state.docs, id);
 
     Ok(Json(serde_json::json!({ "message": "version restored" })))
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Editor } from '@tiptap/vue-3'
 import type { Page } from '~/stores/pages'
 
 definePageMeta({ middleware: ['auth'] })
@@ -6,18 +7,40 @@ definePageMeta({ middleware: ['auth'] })
 const authStore = useAuthStore()
 const pagesStore = usePagesStore()
 const workspacesStore = useWorkspacesStore()
-const { isDark, toggleTheme } = useTheme()
 const route = useRoute()
 
 const shareOpen = ref(false)
 const historyOpen = ref(false)
+// Bumped after a version restore so <Editor> remounts with a fresh Y.Doc that
+// re-syncs from the restored page_content (and a new collab room on the server).
+const editorEpoch = ref(0)
+const commentsOpen = ref(false)
+const focusedCommentMarkId = ref<string | null>(null)
+
+function onVersionRestored() {
+  editorEpoch.value += 1
+  // Refresh page metadata (updated_at) so the topbar "Edited …" updates.
+  if (authStore.workspace) pagesStore.fetchPages(authStore.workspace.id)
+}
 const createWorkspaceOpen = ref(false)
 const membersOpen = ref(false)
-const settingsOpen = ref(false)
+const trashOpen = ref(false)
+
+function openComments(markId?: string) {
+  focusedCommentMarkId.value = markId ?? null
+  commentsOpen.value = true
+}
+
+// TipTap instance for the open page — used by the right-side table of contents.
+const editorInstance = ref<Editor | null>(null)
+const editorScrollRoot = ref<HTMLElement | null>(null)
 
 // A page shared with this user (via link or a direct grant) that isn't in
-// their own workspace's page list.
+// their own workspace's page list — including an anonymous visitor with no
+// workspace/account at all, following a public link.
 const sharedPage = ref<Page | null>(null)
+const sharedPageLoading = ref(false)
+const sharedPageRateLimited = ref(false)
 const linkToken = computed(() => {
   const q = route.query.link
   return typeof q === 'string' ? q : null
@@ -27,16 +50,51 @@ const activePage = computed(
   () => pagesStore.pages.find((p) => p.id === pagesStore.activePageId) ?? sharedPage.value,
 )
 
+// Who else is currently viewing/editing the open page, reported live by Editor's
+// awareness subscription. Reset on page switch so a stale list doesn't flash.
+const presentUsers = ref<
+  { clientId: number; name: string; email: string | null; color: string; avatarUrl: string | null }[]
+>([])
+watch(
+  () => activePage.value?.id,
+  () => {
+    presentUsers.value = []
+    editorInstance.value = null
+  },
+)
+
+const { record: recordRecent } = useRecents()
+
+async function loadSharedPage(id: string) {
+  sharedPage.value = null
+  sharedPageRateLimited.value = false
+  sharedPageLoading.value = true
+  try {
+    sharedPage.value = await pagesStore.fetchPage(id, linkToken.value)
+  } catch (err: any) {
+    sharedPage.value = null
+    sharedPageRateLimited.value = err?.response?.status === 429
+  } finally {
+    sharedPageLoading.value = false
+  }
+}
+
 watch(
   () => pagesStore.activePageId,
-  async (id) => {
-    sharedPage.value = null
-    if (!id || pagesStore.pages.some((p) => p.id === id)) return
-    try {
-      sharedPage.value = await pagesStore.fetchPage(id, linkToken.value)
-    } catch {
+  (id) => {
+    if (!id || pagesStore.pages.some((p) => p.id === id)) {
       sharedPage.value = null
+      return
     }
+    loadSharedPage(id)
+  },
+  { immediate: true },
+)
+
+watch(
+  activePage,
+  (page) => {
+    if (page) recordRecent({ id: page.id, title: page.title, icon: page.icon })
   },
   { immediate: true },
 )
@@ -84,91 +142,95 @@ watch(
     }
   },
 )
-
-async function logout() {
-  await authStore.logout()
-  navigateTo('/login')
-}
 </script>
 
 <template>
-  <div v-if="!authStore.workspace" class="min-h-screen bg-white p-8 font-sans text-slate-600 dark:bg-slate-950 dark:text-slate-400">
-    No workspace yet.
+  <div
+    v-if="!authStore.workspace && !activePage"
+    class="min-h-screen bg-white p-8 font-sans text-neutral-600 dark:bg-neutral-950 dark:text-neutral-400"
+  >
+    <template v-if="sharedPageLoading">Loading…</template>
+    <template v-else-if="sharedPageRateLimited">
+      Too many requests right now — please wait a moment.
+      <button
+        type="button"
+        class="ml-2 underline hover:text-neutral-900 dark:hover:text-neutral-100"
+        @click="pagesStore.activePageId && loadSharedPage(pagesStore.activePageId)"
+      >
+        Retry
+      </button>
+    </template>
+    <template v-else-if="linkToken">This link is invalid, expired, or you don't have access.</template>
+    <template v-else>No workspace yet.</template>
   </div>
 
   <div v-else class="flex h-screen font-sans">
-    <aside class="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-      <PageTree :nodes="pagesStore.pageTree" :workspace-id="authStore.workspace.id" />
-    </aside>
+    <AppSidebar
+      v-if="authStore.workspace"
+      :workspace-id="authStore.workspace.id"
+      @open-create="createWorkspaceOpen = true"
+      @open-members="membersOpen = true"
+      @open-trash="trashOpen = true"
+    />
 
-    <div class="flex flex-1 flex-col bg-white dark:bg-slate-900">
-      <header class="flex items-center justify-between border-b border-slate-200 px-6 py-3 dark:border-slate-800">
-        <WorkspaceSwitcher @open-create="createWorkspaceOpen = true" @open-members="membersOpen = true" />
-        <div class="flex items-center gap-2">
-          <ExportMenu v-if="activePage" :page-id="activePage.id" />
-          <button
+    <div class="flex min-w-0 flex-1 flex-col bg-white dark:bg-neutral-900">
+      <AppTopbar
+        :active-page="activePage"
+        :present-users="presentUsers"
+        @open-share="shareOpen = true"
+        @open-history="activePage?.role !== 'viewer' && (historyOpen = true)"
+        @open-comments="openComments()"
+      />
+
+      <main ref="editorScrollRoot" class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-8">
+        <!--
+          TOC sits beside the document inside the same scroll surface —
+          not a separate shell column — so the page still feels like one canvas.
+        -->
+        <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
+          <div class="min-w-0 w-full max-w-3xl">
+            <p v-if="!activePage" class="text-neutral-500 dark:text-neutral-400">Select a page from the sidebar.</p>
+            <Editor
+              v-else
+              :key="`${activePage.id}:${editorEpoch}`"
+              :page-id="activePage.id"
+              :workspace-id="activePage.workspace_id"
+              :title="activePage.title"
+              :icon="activePage.icon"
+              :link-token="linkToken"
+              :read-only="activePage.role === 'viewer'"
+              @presence-change="presentUsers = $event"
+              @editor-ready="editorInstance = $event"
+              @open-comment="openComments($event)"
+            />
+          </div>
+
+          <TableOfContents
             v-if="activePage"
-            class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            @click="historyOpen = true"
-          >
-            History
-          </button>
-          <button
-            v-if="activePage"
-            class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            @click="shareOpen = true"
-          >
-            Share
-          </button>
-          <button
-            type="button"
-            aria-label="Toggle theme"
-            class="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-            @click="toggleTheme"
-          >
-            <svg v-if="isDark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
-              <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            aria-label="Settings"
-            class="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-            @click="settingsOpen = true"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
-              <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-          <button
-            class="rounded px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-            @click="logout"
-          >
-            Log out
-          </button>
+            :editor="editorInstance"
+            :scroll-root="editorScrollRoot"
+          />
         </div>
-      </header>
-
-      <main class="flex-1 overflow-y-auto p-8">
-        <p v-if="!activePage" class="text-slate-500 dark:text-slate-400">Select a page from the sidebar.</p>
-        <Editor
-          v-else
-          :key="activePage.id"
-          :page-id="activePage.id"
-          :workspace-id="activePage.workspace_id"
-          :title="activePage.title"
-          :link-token="linkToken"
-        />
       </main>
     </div>
 
     <ShareDialog v-if="activePage" v-model:open="shareOpen" :page-id="activePage.id" />
-    <VersionHistory v-if="activePage" v-model:open="historyOpen" :page-id="activePage.id" />
-    <CreateWorkspaceModal v-model:open="createWorkspaceOpen" />
-    <WorkspaceMembersModal v-model:open="membersOpen" :workspace-id="authStore.workspace.id" />
-    <UserSettingsModal v-model:open="settingsOpen" />
+    <VersionHistory
+      v-if="activePage && activePage.role !== 'viewer'"
+      v-model:open="historyOpen"
+      :page-id="activePage.id"
+      @restored="onVersionRestored"
+    />
+    <CommentSidebar
+      v-if="activePage"
+      v-model:open="commentsOpen"
+      :page-id="activePage.id"
+      :focused-mark-id="focusedCommentMarkId"
+    />
+    <template v-if="authStore.workspace">
+      <CreateWorkspaceModal v-model:open="createWorkspaceOpen" />
+      <WorkspaceMembersModal v-model:open="membersOpen" :workspace-id="authStore.workspace.id" />
+      <TrashModal v-model:open="trashOpen" :workspace-id="authStore.workspace.id" />
+    </template>
   </div>
 </template>

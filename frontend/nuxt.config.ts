@@ -12,7 +12,7 @@ export default defineNuxtConfig({
       // The only case needing client JS is "user previously chose light" —
       // remove the class before paint (blocking script, default head position).
       htmlAttrs: { class: 'dark' },
-      title: 'Me-Doc — Write together, live',
+      title: 'MeDoc — Write together, live!',
       titleTemplate: '%s',
       meta: [
         { name: 'description', content: 'Real-time collaborative notes and docs for your team.' },

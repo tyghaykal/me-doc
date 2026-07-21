@@ -95,39 +95,39 @@ watch(
         role="dialog"
         aria-modal="true"
         aria-label="Workspace members"
-        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-slate-900"
+        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900"
         @keydown.esc="close"
       >
         <div class="flex items-start justify-between">
-          <h2 class="text-xl font-bold text-slate-900 dark:text-slate-100">Members</h2>
+          <h2 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">Members</h2>
           <button
             type="button"
             aria-label="Close"
-            class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+            class="text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
             @click="close"
           >
             ✕
           </button>
         </div>
 
-        <p v-if="loading" class="mt-5 text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        <p v-if="loading" class="mt-5 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>
         <p v-else-if="error" class="mt-5 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
-        <ul v-else class="mt-5 divide-y divide-slate-200 dark:divide-slate-800">
+        <ul v-else class="mt-5 divide-y divide-neutral-200 dark:divide-neutral-800">
           <li
             v-for="m in members"
             :key="m.user_id"
             class="flex items-center justify-between py-3"
           >
             <div class="min-w-0">
-              <p class="truncate text-sm text-slate-700 dark:text-slate-300">{{ m.email }}</p>
-              <span class="text-xs text-slate-400">{{ m.role }}</span>
+              <p class="truncate text-sm text-neutral-700 dark:text-neutral-300">{{ m.email }}</p>
+              <span class="text-xs text-neutral-400">{{ m.role }}</span>
             </div>
             <button
               v-if="m.user_id === authStore.user?.id"
               type="button"
               :disabled="removingId === m.user_id"
-              class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              class="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
               @click="remove(m.user_id)"
             >
               {{ removingId === m.user_id ? '…' : 'Leave' }}
@@ -136,7 +136,7 @@ watch(
               v-else-if="canManage"
               type="button"
               :disabled="removingId === m.user_id"
-              class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              class="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
               @click="remove(m.user_id)"
             >
               {{ removingId === m.user_id ? '…' : 'Remove' }}
@@ -144,19 +144,19 @@ watch(
           </li>
         </ul>
 
-        <section v-if="canManage" class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
-          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Invite by email</h3>
+        <section v-if="canManage" class="mt-6 border-t border-neutral-200 pt-5 dark:border-neutral-800">
+          <h3 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Invite by email</h3>
           <form class="mt-2 flex gap-2" @submit.prevent="invite">
             <input
               v-model="inviteEmail"
               type="email"
               required
               placeholder="name@example.com"
-              class="flex-1 rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
             <select
               v-model="inviteRole"
-              class="rounded border border-slate-300 px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="rounded border border-neutral-300 px-2 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             >
               <option value="admin">Admin</option>
               <option value="member">Member</option>
@@ -165,7 +165,7 @@ watch(
             <button
               type="submit"
               :disabled="inviting"
-              class="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+              class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
             >
               {{ inviting ? '…' : 'Invite' }}
             </button>

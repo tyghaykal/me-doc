@@ -10,6 +10,7 @@ const emit = defineEmits<{
 const api = useApi()
 const config = useRuntimeConfig()
 const minioBase = config.public.minioBase
+const authStore = useAuthStore()
 
 interface Me {
   id: string
@@ -58,6 +59,7 @@ async function saveName() {
   nameSaving.value = true
   try {
     await api('/auth/me', { method: 'PATCH', body: { display_name: displayName.value } })
+    if (authStore.user) authStore.user.display_name = displayName.value
     nameOk.value = true
   } catch (err: any) {
     nameError.value = errText(err, 'Failed to save name.')
@@ -78,6 +80,7 @@ async function onAvatarChange(event: Event) {
     )
     await fetch(upload_url, { method: 'PUT', body: file })
     avatarKey.value = s3_key
+    if (authStore.user) authStore.user.avatar_key = s3_key
   } catch (err: any) {
     avatarError.value = errText(err, 'Failed to upload avatar.')
   } finally {
@@ -131,15 +134,15 @@ watch(
         role="dialog"
         aria-modal="true"
         aria-label="User settings"
-        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-slate-900"
+        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900"
         @keydown.esc="close"
       >
         <div class="flex items-start justify-between">
-          <h2 class="text-xl font-bold text-slate-900 dark:text-slate-100">Settings</h2>
+          <h2 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">Settings</h2>
           <button
             type="button"
             aria-label="Close"
-            class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+            class="text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
             @click="close"
           >
             ✕
@@ -147,18 +150,18 @@ watch(
         </div>
 
         <section class="mt-5">
-          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Display name</h3>
+          <h3 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Display name</h3>
           <form class="mt-2 flex gap-2" @submit.prevent="saveName">
             <input
               v-model="displayName"
               type="text"
               placeholder="Your name"
-              class="flex-1 rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
             <button
               type="submit"
               :disabled="nameSaving"
-              class="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+              class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
             >
               {{ nameSaving ? '…' : 'Save' }}
             </button>
@@ -167,8 +170,8 @@ watch(
           <p v-else-if="nameOk" class="mt-2 text-sm text-green-600 dark:text-green-400">Saved.</p>
         </section>
 
-        <section class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
-          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Avatar</h3>
+        <section class="mt-6 border-t border-neutral-200 pt-5 dark:border-neutral-800">
+          <h3 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Avatar</h3>
           <div class="mt-2 flex items-center gap-3">
             <img
               v-if="avatarUrl"
@@ -180,42 +183,42 @@ watch(
               type="file"
               accept="image/*"
               :disabled="avatarUploading"
-              class="text-sm text-slate-700 dark:text-slate-300"
+              class="text-sm text-neutral-500 file:mr-3 file:rounded file:border-0 file:bg-neutral-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-neutral-700 disabled:opacity-50 dark:text-neutral-400 dark:file:bg-neutral-100 dark:file:text-neutral-900 dark:hover:file:bg-neutral-200"
               @change="onAvatarChange"
             />
           </div>
-          <p v-if="avatarUploading" class="mt-2 text-sm text-slate-500 dark:text-slate-400">Uploading…</p>
+          <p v-if="avatarUploading" class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Uploading…</p>
           <p v-if="avatarError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ avatarError }}</p>
         </section>
 
-        <section class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
-          <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Change password</h3>
+        <section class="mt-6 border-t border-neutral-200 pt-5 dark:border-neutral-800">
+          <h3 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Change password</h3>
           <form class="mt-2 space-y-2" @submit.prevent="changePassword">
             <input
               v-model="currentPassword"
               type="password"
               required
               placeholder="Current password"
-              class="w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
             <input
               v-model="newPassword"
               type="password"
               required
               placeholder="New password"
-              class="w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
             <input
               v-model="confirmPassword"
               type="password"
               required
               placeholder="Confirm new password"
-              class="w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
             <button
               type="submit"
               :disabled="pwSaving"
-              class="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+              class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
             >
               {{ pwSaving ? '…' : 'Change password' }}
             </button>

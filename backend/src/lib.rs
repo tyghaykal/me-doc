@@ -4,6 +4,7 @@
 //! `sharing::resolve_role`.
 pub mod auth;
 pub mod collab;
+pub mod comments;
 pub mod config;
 pub mod db;
 pub mod email;

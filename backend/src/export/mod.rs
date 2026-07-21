@@ -1,17 +1,16 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::header,
     response::IntoResponse,
     routing::get,
     Router,
 };
 use serde::Deserialize;
-use uuid::Uuid;
 use yrs::updates::decoder::Decode;
 use yrs::{Any, Doc, GetString, Out, ReadTxn, Text, Transact, Update, Xml, XmlElementRef, XmlFragment, XmlOut, XmlTextRef};
 
-use crate::auth::{error::AuthError, extractor::AuthenticatedUser};
-use crate::pages::require_membership;
+use crate::auth::error::AuthError;
+use crate::sharing::{PagePermission, Role};
 use crate::AppState;
 
 mod blocks;
@@ -29,10 +28,13 @@ struct ExportQuery {
 
 async fn export_page(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
     Query(query): Query<ExportQuery>,
 ) -> Result<impl IntoResponse, AuthError> {
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
+
     let format = query.format.as_deref().unwrap_or("md");
     if !matches!(format, "md" | "docx" | "pdf") {
         return Err(AuthError::Validation(format!(
@@ -40,31 +42,39 @@ async fn export_page(
         )));
     }
 
-    let row: Option<(Uuid, String, Option<Vec<u8>>)> = sqlx::query_as(
-        "select p.workspace_id, p.slug, pc.yjs_state
+    let row: Option<(String, Option<Vec<u8>>)> = sqlx::query_as(
+        "select p.slug, pc.yjs_state
          from pages p left join page_content pc on pc.page_id = p.id
          where p.id = $1",
     )
-    .bind(id)
+    .bind(perm.page_id)
     .fetch_optional(&state.db)
     .await?;
 
-    let (workspace_id, slug, yjs_state) = row.ok_or(AuthError::NotFound)?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
+    let (slug, yjs_state) = row.ok_or(AuthError::NotFound)?;
 
     let markdown = yjs_to_markdown(&yjs_state.unwrap_or_default());
 
+    // DOCX/PDF share one parse + image fetch so remote assets are pulled once.
     let (content_type, ext, bytes): (&str, &str, Vec<u8>) = match format {
-        "docx" => (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "docx",
-            docx::markdown_to_docx(&markdown).map_err(AuthError::Internal)?,
-        ),
-        "pdf" => (
-            "application/pdf",
-            "pdf",
-            pdf::markdown_to_pdf(&markdown).map_err(AuthError::Internal)?,
-        ),
+        "docx" | "pdf" => {
+            let parsed = blocks::parse_markdown(&markdown);
+            let urls = blocks::collect_image_urls(&parsed);
+            let images = blocks::fetch_images(&urls).await;
+            if format == "docx" {
+                (
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "docx",
+                    docx::blocks_to_docx(&parsed, &images).map_err(AuthError::Internal)?,
+                )
+            } else {
+                (
+                    "application/pdf",
+                    "pdf",
+                    pdf::blocks_to_pdf(&parsed, &images).map_err(AuthError::Internal)?,
+                )
+            }
+        }
         _ => (
             "text/markdown; charset=utf-8",
             "md",

@@ -27,31 +27,31 @@ async function submit() {
 </script>
 
 <template>
-  <main class="min-h-screen flex items-center justify-center p-8 font-sans bg-slate-50 dark:bg-slate-950">
+  <main class="min-h-screen flex items-center justify-center p-8 font-sans bg-neutral-50 dark:bg-neutral-950">
     <form
-      class="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+      class="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-8 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
       @submit.prevent="submit"
     >
-      <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100">Log in</h1>
-      <p class="mt-2 text-slate-600 dark:text-slate-400">Welcome back. Enter your credentials.</p>
+      <h1 class="text-3xl font-bold text-neutral-900 dark:text-neutral-100">Log in</h1>
+      <p class="mt-2 text-neutral-600 dark:text-neutral-400">Welcome back. Enter your credentials.</p>
 
-      <label class="block mt-6 text-sm font-medium text-slate-700 dark:text-slate-300">Email</label>
+      <label class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</label>
       <input
         v-model="email"
         type="email"
         required
         autocomplete="email"
-        class="mt-1 w-full rounded border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        class="mt-1 w-full rounded border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
       />
 
-      <label class="block mt-4 text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
+      <label class="block mt-4 text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
       <input
         v-model="password"
         type="password"
         required
         minlength="8"
         autocomplete="current-password"
-        class="mt-1 w-full rounded border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        class="mt-1 w-full rounded border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
       />
 
       <p v-if="error" class="mt-4 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
@@ -59,14 +59,14 @@ async function submit() {
       <button
         type="submit"
         :disabled="loading"
-        class="mt-6 w-full rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+        class="mt-6 w-full rounded bg-neutral-900 px-4 py-2 font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
       >
         {{ loading ? 'Logging in…' : 'Log in' }}
       </button>
 
-      <p class="mt-4 text-sm text-slate-600 dark:text-slate-400">
+      <p class="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
         No account?
-        <NuxtLink to="/register" class="font-medium text-slate-900 underline dark:text-slate-100">Sign up</NuxtLink>
+        <NuxtLink to="/register" class="font-medium text-neutral-900 underline dark:text-neutral-100">Sign up</NuxtLink>
       </p>
     </form>
   </main>

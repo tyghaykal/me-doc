@@ -5,6 +5,180 @@ html {
   font-size: 18px;
 }
 
+.ProseMirror a {
+  color: #2563eb; /* blue-600 */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.ProseMirror a:hover {
+  color: #1d4ed8; /* blue-700 */
+}
+
+.dark .ProseMirror a {
+  color: #60a5fa; /* blue-400 */
+}
+
+.dark .ProseMirror a:hover {
+  color: #93c5fd; /* blue-300 */
+}
+
+.ProseMirror h1 {
+  margin-top: 1.5rem;
+  font-size: 1.875rem;
+  font-weight: 700;
+}
+
+.ProseMirror h2 {
+  margin-top: 1.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.ProseMirror h3 {
+  margin-top: 1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.ProseMirror h4 {
+  margin-top: 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.ProseMirror h5 {
+  margin-top: 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.ProseMirror h6 {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #737373; /* neutral-500 */
+}
+
+.dark .ProseMirror h6 {
+  color: #a3a3a3; /* neutral-400 */
+}
+
+/* Definition lists */
+.ProseMirror dl {
+  margin: 0.75rem 0;
+}
+
+.ProseMirror dt {
+  font-weight: 600;
+}
+
+.ProseMirror dd {
+  margin: 0 0 0.5rem 1.5rem;
+  color: #525252; /* neutral-600 */
+}
+
+.dark .ProseMirror dd {
+  color: #a3a3a3; /* neutral-400 */
+}
+
+/* Abbreviations */
+.ProseMirror abbr {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+/* Footnotes section (from marked-footnote's output) */
+.ProseMirror h2#footnote-label {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e5e5; /* neutral-200 */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #737373; /* neutral-500 */
+}
+
+.dark .ProseMirror h2#footnote-label {
+  border-top-color: #404040; /* neutral-700 */
+  color: #a3a3a3; /* neutral-400 */
+}
+
+/* Custom containers (::: warning ... :::) */
+.ProseMirror div[data-container] {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid #a3a3a3; /* neutral-400 default */
+  border-radius: 0.25rem;
+  background-color: #f5f5f5; /* neutral-100 */
+}
+
+.ProseMirror div[data-container] > *:first-child {
+  margin-top: 0;
+}
+
+.ProseMirror div[data-container] > *:last-child {
+  margin-bottom: 0;
+}
+
+.ProseMirror div[data-container]::before {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  content: attr(data-container);
+}
+
+.ProseMirror div[data-container="warning"] {
+  border-left-color: #d97706; /* amber-600 */
+  background-color: #fffbeb; /* amber-50 */
+}
+
+.ProseMirror div[data-container="danger"],
+.ProseMirror div[data-container="error"] {
+  border-left-color: #dc2626; /* red-600 */
+  background-color: #fef2f2; /* red-50 */
+}
+
+.ProseMirror div[data-container="tip"],
+.ProseMirror div[data-container="success"] {
+  border-left-color: #16a34a; /* green-600 */
+  background-color: #f0fdf4; /* green-50 */
+}
+
+.ProseMirror div[data-container="info"] {
+  border-left-color: #2563eb; /* blue-600 */
+  background-color: #eff6ff; /* blue-50 */
+}
+
+.dark .ProseMirror div[data-container] {
+  background-color: #262626; /* neutral-800 */
+}
+
+.dark .ProseMirror div[data-container="warning"] {
+  background-color: rgb(217 119 6 / 0.12);
+}
+
+.dark .ProseMirror div[data-container="danger"],
+.dark .ProseMirror div[data-container="error"] {
+  background-color: rgb(220 38 38 / 0.12);
+}
+
+.dark .ProseMirror div[data-container="tip"],
+.dark .ProseMirror div[data-container="success"] {
+  background-color: rgb(22 163 74 / 0.12);
+}
+
+.dark .ProseMirror div[data-container="info"] {
+  background-color: rgb(37 99 235 / 0.12);
+}
+
 /* TipTap task list: checkbox + content must share a full-width flex row,
    otherwise the content <div> collapses and the caret disappears. */
 .ProseMirror ul[data-type="taskList"] {
@@ -46,7 +220,7 @@ html {
   margin: 0;
   flex-shrink: 0;
   cursor: pointer;
-  border: 1.5px solid #94a3b8; /* slate-400 */
+  border: 1.5px solid #a3a3a3; /* neutral-400 */
   border-radius: 0.3rem;
   background-color: transparent;
   background-repeat: no-repeat;
@@ -59,34 +233,40 @@ html {
 }
 
 .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
-  border-color: #64748b; /* slate-500 */
-  box-shadow: 0 0 0 3px rgb(148 163 184 / 0.2);
+  border-color: #737373; /* neutral-500 */
+  box-shadow: 0 0 0 3px rgb(115 115 115 / 0.2);
 }
 
 .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:focus-visible {
   outline: none;
-  border-color: #6366f1; /* indigo-500 */
-  box-shadow: 0 0 0 3px rgb(99 102 241 / 0.3);
+  border-color: #171717; /* neutral-900 */
+  box-shadow: 0 0 0 3px rgb(23 23 23 / 0.3);
 }
 
 .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
-  border-color: #6366f1; /* indigo-500 */
-  background-color: #6366f1;
+  border-color: #171717; /* neutral-900 */
+  background-color: #171717;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
 }
 
 .dark .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
-  border-color: #64748b; /* slate-500 */
+  border-color: #737373; /* neutral-500 */
 }
 
 .dark .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
-  border-color: #94a3b8;
-  box-shadow: 0 0 0 3px rgb(100 116 139 / 0.25);
+  border-color: #a3a3a3; /* neutral-400 */
+  box-shadow: 0 0 0 3px rgb(163 163 163 / 0.25);
+}
+
+.dark .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:focus-visible {
+  border-color: #f5f5f5; /* neutral-100 */
+  box-shadow: 0 0 0 3px rgb(245 245 245 / 0.3);
 }
 
 .dark .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
-  border-color: #818cf8; /* indigo-400 */
-  background-color: #818cf8;
+  border-color: #f5f5f5; /* neutral-100 */
+  background-color: #f5f5f5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
 }
 
 .ProseMirror ul[data-type="taskList"] li > div {
@@ -99,12 +279,12 @@ html {
 }
 
 .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
-  color: #94a3b8; /* slate-400 */
+  color: #a3a3a3; /* neutral-400 */
   text-decoration: line-through;
 }
 
 .dark .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
-  color: #64748b; /* slate-500 */
+  color: #737373; /* neutral-500 */
 }
 
 /* Code blocks — Sublime Text (Monokai) look, dark regardless of app theme. */
@@ -133,14 +313,14 @@ html {
 .ProseMirror code {
   border-radius: 0.25rem;
   padding: 0.125rem 0.35rem;
-  background-color: #f1f5f9; /* slate-100 */
+  background-color: #f5f5f5; /* neutral-100 */
   color: #be185d; /* pink-700 */
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.875em;
 }
 
 .dark .ProseMirror code {
-  background-color: #1e293b; /* slate-800 */
+  background-color: #262626; /* neutral-800 */
   color: #f9a8d4; /* pink-300 */
 }
 
@@ -151,4 +331,195 @@ html {
   background: none;
   color: inherit;
   font-size: inherit;
+}
+
+/* Collaborative cursors — border-color/background-color set inline per-user
+   by CollaborationCaret; these rules only supply shape/position/typography. */
+.collaboration-carets__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid;
+  border-right: 1px solid;
+  word-break: normal;
+  pointer-events: none;
+}
+
+.collaboration-carets__label {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem 0.25rem 0.25rem 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Tables */
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0.75rem 0;
+  overflow: hidden;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  position: relative;
+  min-width: 1em;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e5e5e5; /* neutral-200 */
+  vertical-align: top;
+}
+
+.dark .ProseMirror th,
+.dark .ProseMirror td {
+  border-color: #404040; /* neutral-700 */
+}
+
+.ProseMirror th {
+  background-color: #fafafa; /* neutral-50 */
+  font-weight: 600;
+  text-align: left;
+}
+
+.dark .ProseMirror th {
+  background-color: #262626; /* neutral-800 */
+}
+
+.ProseMirror .selectedCell {
+  background-color: rgb(115 115 115 / 0.12);
+}
+
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: #171717;
+  pointer-events: none;
+}
+
+/* Resizable images — Tiptap's ResizableNodeView renders these handle divs
+   unstyled by design (position/data-attrs only, no size/color/cursor), so
+   without this they exist in the DOM but are invisible and 0x0 — nothing
+   to see or click. */
+.ProseMirror [data-resize-container] {
+  max-width: 100%;
+}
+
+.ProseMirror [data-resize-wrapper] {
+  max-width: 100%;
+}
+
+.ProseMirror [data-resize-handle] {
+  width: 0.65rem;
+  height: 0.65rem;
+  background-color: #171717; /* neutral-900 */
+  border: 2px solid white;
+  border-radius: 9999px;
+  opacity: 0;
+  z-index: 10;
+  transition: opacity 0.1s ease;
+}
+
+.dark .ProseMirror [data-resize-handle] {
+  background-color: #f5f5f5; /* neutral-100 */
+  border-color: #171717;
+}
+
+.ProseMirror [data-resize-wrapper]:hover [data-resize-handle],
+.ProseMirror [data-resize-container][data-resize-state='true'] [data-resize-handle] {
+  opacity: 1;
+}
+
+.ProseMirror [data-resize-handle='top-left'],
+.ProseMirror [data-resize-handle='bottom-right'] {
+  cursor: nwse-resize;
+}
+
+.ProseMirror [data-resize-handle='top-right'],
+.ProseMirror [data-resize-handle='bottom-left'] {
+  cursor: nesw-resize;
+}
+
+.dark .ProseMirror .column-resize-handle {
+  background-color: #f5f5f5;
+}
+
+/* Comment anchors */
+.comment-highlight {
+  background-color: rgb(250 204 21 / 0.35); /* yellow-400 */
+  border-bottom: 2px solid rgb(202 138 4 / 0.6); /* yellow-600 */
+  cursor: pointer;
+  border-radius: 0.1em;
+}
+
+.comment-highlight:hover {
+  background-color: rgb(250 204 21 / 0.5);
+}
+
+.dark .comment-highlight {
+  background-color: rgb(250 204 21 / 0.2);
+}
+
+.dark .comment-highlight:hover {
+  background-color: rgb(250 204 21 / 0.35);
+}
+
+.comment-highlight.comment-highlight-active {
+  background-color: rgb(251 191 36 / 0.55); /* amber-400 */
+  box-shadow: 0 0 0 2px rgb(251 191 36 / 0.45);
+}
+
+.dark .comment-highlight.comment-highlight-active {
+  background-color: rgb(251 191 36 / 0.35);
+  box-shadow: 0 0 0 2px rgb(251 191 36 / 0.35);
+}
+
+.comment-highlight.comment-resolved {
+  background-color: rgb(163 163 163 / 0.2); /* neutral-400 */
+  border-bottom-color: rgb(163 163 163 / 0.5);
+}
+
+/* Thin scrollbars (Firefox + Chromium/WebKit) */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(163 163 163 / 0.55) transparent; /* neutral-400 */
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(163 163 163 / 0.55);
+  border-radius: 9999px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(115 115 115 / 0.7); /* neutral-500 */
+}
+
+.dark .thin-scrollbar {
+  scrollbar-color: rgb(82 82 82 / 0.8) transparent; /* neutral-600 */
+}
+
+.dark .thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(82 82 82 / 0.8);
+}
+
+.dark .thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(115 115 115 / 0.9);
 }

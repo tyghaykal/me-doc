@@ -7,6 +7,8 @@
 //! blocks + inline runs that `docx.rs`/`pdf.rs` render. pulldown-cmark does the
 //! fiddly inline-mark parsing so we don't reinvent it.
 
+use std::collections::HashMap;
+
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone)]
@@ -25,6 +27,7 @@ pub enum Block {
     Quote(Vec<Run>),
     Code(String),
     ListItem { marker: String, depth: usize, runs: Vec<Run> },
+    Image { alt: String, url: String },
 }
 
 pub fn parse_markdown(md: &str) -> Vec<Block> {
@@ -46,6 +49,7 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
     let mut pending_item: Option<(String, usize)> = None;
     let mut in_image = false;
     let mut image_alt = String::new();
+    let mut image_url = String::new();
 
     for event in parser {
         match event {
@@ -55,7 +59,10 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
             }
             Event::End(TagEnd::Heading(_)) => {
                 let level = heading.take().unwrap_or(1);
-                blocks.push(Block::Heading { level, runs: std::mem::take(&mut runs) });
+                blocks.push(Block::Heading {
+                    level,
+                    runs: std::mem::take(&mut runs),
+                });
             }
 
             Event::Start(Tag::Paragraph) => {
@@ -68,8 +75,10 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
                     // inside a list item: runs are flushed at End(Item).
                 } else if in_quote {
                     blocks.push(Block::Quote(std::mem::take(&mut runs)));
-                } else {
+                } else if !runs.is_empty() {
                     blocks.push(Block::Paragraph(std::mem::take(&mut runs)));
+                } else {
+                    runs.clear();
                 }
             }
 
@@ -84,7 +93,6 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
             }
 
             Event::Start(Tag::List(start)) => {
-                // Capture any text before a nested list as its own item first.
                 flush_item(&mut blocks, &mut pending_item, &mut runs);
                 list_stack.push(start);
             }
@@ -115,16 +123,30 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
             Event::Start(Tag::Strikethrough) => strike += 1,
             Event::End(TagEnd::Strikethrough) => strike -= 1,
 
-            // ponytail: remote images aren't fetched/embedded — render alt text
-            // only. Add an HTTP fetch + image embed if fidelity ever matters.
-            Event::Start(Tag::Image { .. }) => {
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                // Flush any pending paragraph text so the image stands alone.
+                if !runs.is_empty() && pending_item.is_none() && list_stack.is_empty() && !in_quote {
+                    blocks.push(Block::Paragraph(std::mem::take(&mut runs)));
+                }
                 in_image = true;
                 image_alt.clear();
+                image_url = dest_url.into_string();
             }
             Event::End(TagEnd::Image) => {
                 in_image = false;
                 let alt = std::mem::take(&mut image_alt);
-                push_run(&mut runs, &format!("[image: {alt}]"), bold, italic, false, strike);
+                let url = std::mem::take(&mut image_url);
+                if pending_item.is_some() || !list_stack.is_empty() {
+                    // Inside a list: keep a textual placeholder in the item runs.
+                    let label = if alt.is_empty() {
+                        "[image]".to_string()
+                    } else {
+                        format!("[image: {alt}]")
+                    };
+                    push_run(&mut runs, &label, bold, italic, false, strike);
+                } else {
+                    blocks.push(Block::Image { alt, url });
+                }
             }
 
             Event::Text(t) => {
@@ -144,7 +166,7 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
             Event::SoftBreak | Event::HardBreak => {
                 if let Some(buf) = code_buf.as_mut() {
                     buf.push('\n');
-                } else {
+                } else if !in_image {
                     push_run(&mut runs, " ", bold, italic, false, strike);
                 }
             }
@@ -164,9 +186,63 @@ pub fn parse_markdown(md: &str) -> Vec<Block> {
     blocks
 }
 
+pub fn collect_image_urls(blocks: &[Block]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for b in blocks {
+        if let Block::Image { url, .. } = b {
+            if !url.is_empty() && !urls.iter().any(|u| u == url) {
+                urls.push(url.clone());
+            }
+        }
+    }
+    urls
+}
+
+/// Best-effort HTTP fetch of image URLs. Failures are omitted from the map so
+/// renderers can fall back to alt text. Caps each body at 8 MiB.
+pub async fn fetch_images(urls: &[String]) -> HashMap<String, Vec<u8>> {
+    let mut out = HashMap::new();
+    if urls.is_empty() {
+        return out;
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return out,
+    };
+
+    const MAX_BYTES: usize = 8 * 1024 * 1024;
+
+    for url in urls {
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            continue;
+        }
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.bytes().await {
+                    Ok(bytes) if bytes.len() <= MAX_BYTES && !bytes.is_empty() => {
+                        out.insert(url.clone(), bytes.to_vec());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn flush_item(blocks: &mut Vec<Block>, pending: &mut Option<(String, usize)>, runs: &mut Vec<Run>) {
     if let Some((marker, depth)) = pending.take() {
-        blocks.push(Block::ListItem { marker, depth, runs: std::mem::take(runs) });
+        blocks.push(Block::ListItem {
+            marker,
+            depth,
+            runs: std::mem::take(runs),
+        });
     }
 }
 
@@ -205,14 +281,14 @@ mod tests {
 
         assert!(matches!(blocks.first(), Some(Block::Heading { level: 1, .. })));
 
-        let bold_run = blocks.iter().any(|b| {
-            matches!(b, Block::Paragraph(runs) if runs.iter().any(|r| r.bold))
-        });
+        let bold_run = blocks
+            .iter()
+            .any(|b| matches!(b, Block::Paragraph(runs) if runs.iter().any(|r| r.bold)));
         assert!(bold_run, "expected a bold run: {blocks:?}");
 
-        let code_run = blocks.iter().any(|b| {
-            matches!(b, Block::Paragraph(runs) if runs.iter().any(|r| r.code))
-        });
+        let code_run = blocks
+            .iter()
+            .any(|b| matches!(b, Block::Paragraph(runs) if runs.iter().any(|r| r.code)));
         assert!(code_run, "expected an inline code run: {blocks:?}");
 
         let items: Vec<_> = blocks
@@ -230,5 +306,17 @@ mod tests {
         assert!(blocks
             .iter()
             .any(|b| matches!(b, Block::Code(c) if c.contains("fn main"))));
+    }
+
+    #[test]
+    fn parses_image_block() {
+        let md = "before\n\n![diagram](https://example.com/a.png)\n\nafter\n";
+        let blocks = parse_markdown(md);
+        let img = blocks.iter().find_map(|b| match b {
+            Block::Image { alt, url } => Some((alt.as_str(), url.as_str())),
+            _ => None,
+        });
+        assert_eq!(img, Some(("diagram", "https://example.com/a.png")));
+        assert_eq!(collect_image_urls(&blocks), vec!["https://example.com/a.png".to_string()]);
     }
 }

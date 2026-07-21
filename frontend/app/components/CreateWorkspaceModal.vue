@@ -48,15 +48,15 @@ function close() {
         role="dialog"
         aria-modal="true"
         aria-label="Create workspace"
-        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-slate-900"
+        class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900"
         @keydown.esc="close"
       >
         <div class="flex items-start justify-between">
-          <h2 class="text-xl font-bold text-slate-900 dark:text-slate-100">New workspace</h2>
+          <h2 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">New workspace</h2>
           <button
             type="button"
             aria-label="Close"
-            class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+            class="text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
             @click="close"
           >
             ✕
@@ -69,12 +69,12 @@ function close() {
             type="text"
             required
             placeholder="Workspace name"
-            class="flex-1 rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            class="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
           />
           <button
             type="submit"
             :disabled="saving"
-            class="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+            class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
           >
             {{ saving ? '…' : 'Create' }}
           </button>

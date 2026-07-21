@@ -29,7 +29,7 @@ const features = [
       <div
         v-for="f in features"
         :key="f.title"
-        class="rounded-lg border border-slate-200 p-6 dark:border-slate-800"
+        class="rounded-lg border border-neutral-200 p-6 dark:border-neutral-800"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -39,12 +39,12 @@ const features = [
           stroke-width="1.75"
           stroke-linecap="round"
           stroke-linejoin="round"
-          class="h-6 w-6 text-indigo-600 dark:text-indigo-400"
+          class="h-6 w-6 text-neutral-900 dark:text-neutral-100"
         >
           <path :d="f.path" />
         </svg>
-        <h3 class="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">{{ f.title }}</h3>
-        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">{{ f.description }}</p>
+        <h3 class="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">{{ f.title }}</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{{ f.description }}</p>
       </div>
     </div>
   </section>

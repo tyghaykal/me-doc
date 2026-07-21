@@ -90,17 +90,23 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      S3_ENDPOINT: ${S3_ENDPOINT}
-      S3_REGION: ${S3_REGION}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
-      S3_BUCKET: ${S3_BUCKET}
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_FROM: ${SMTP_FROM}
-      BACKEND_PORT: ${BACKEND_PORT:-8080}
+      # Container-internal addresses always use the service's own listen port
+      # (postgres:5432, redis:6379, minio:9000, mailpit:1025, backend:8080).
+      # *_HOST_PORT vars only remap the published host side of `ports:` —
+      # never put those into REDIS_URL / S3_ENDPOINT / SMTP_PORT / BACKEND_PORT
+      # or inter-container traffic (and nginx) will hit the wrong port.
+      DATABASE_URL: postgres://${POSTGRES_USER:-medoc}:${POSTGRES_PASSWORD:-medoc}@postgres:5432/${POSTGRES_DB:-medoc}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${MINIO_API_HOST_PORT:-9010}}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin123}
+      S3_BUCKET: ${S3_BUCKET:-medoc}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: ${SMTP_FROM:-no-reply@me-doc.local}
+      BACKEND_PORT: "8080"
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
@@ -137,6 +143,12 @@ services:
       # nginx entirely and hit the backend container directly, unaffected.
       NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-https://localhost}
       NUXT_API_BASE_SERVER: http://backend:8080
+      # Browser-reachable MinIO base for avatar/attachment URLs (nuxt.config.ts
+      # otherwise falls back to a hardcoded :9010, going stale whenever
+      # MINIO_API_HOST_PORT changes in .env) — derived from the same
+      # host-port var the backend's S3_PUBLIC_ENDPOINT already uses, so both
+      # sides move together automatically.
+      NUXT_PUBLIC_MINIO_BASE: ${NUXT_PUBLIC_MINIO_BASE:-http://localhost:${MINIO_API_HOST_PORT:-9010}/${S3_BUCKET:-medoc}}
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:

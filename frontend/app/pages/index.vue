@@ -19,7 +19,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-white font-sans dark:bg-slate-950">
+  <div class="min-h-screen bg-white font-sans dark:bg-neutral-950">
     <LandingNav />
     <LandingHero />
     <LandingFeatures />

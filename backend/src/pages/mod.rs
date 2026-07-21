@@ -27,6 +27,11 @@ pub struct Page {
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub icon: Option<String>,
+    /// The requester's resolved sharing role ("viewer"/"editor") — only
+    /// populated by `get_page`, which is the only handler that knows it
+    /// (others gate on workspace membership, not the page-sharing grant).
+    pub role: Option<String>,
 }
 
 type PageRow = (
@@ -40,6 +45,7 @@ type PageRow = (
     Uuid,
     DateTime<Utc>,
     DateTime<Utc>,
+    Option<String>,
 );
 
 impl From<PageRow> for Page {
@@ -55,11 +61,13 @@ impl From<PageRow> for Page {
             created_by: r.7,
             created_at: r.8,
             updated_at: r.9,
+            icon: r.10,
+            role: None,
         }
     }
 }
 
-const PAGE_COLUMNS: &str = "id, workspace_id, parent_page_id, title, slug, order_index, archived_at, created_by, created_at, updated_at";
+const PAGE_COLUMNS: &str = "id, workspace_id, parent_page_id, title, slug, order_index, archived_at, created_by, created_at, updated_at, icon";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -77,6 +85,12 @@ pub fn router() -> Router<AppState> {
         )
         .route("/attachments/presign", post(presign_attachment))
         .route("/workspaces/:workspace_id/search", get(search_pages))
+        .route("/me/shared-pages", get(list_shared_pages))
+        .route("/me/favorite-pages", get(list_favorite_pages))
+        .route(
+            "/pages/:id/favorite",
+            post(favorite_page).delete(unfavorite_page),
+        )
 }
 
 async fn page_workspace(db: &PgPool, id: Uuid) -> Result<Uuid, AuthError> {
@@ -99,12 +113,15 @@ struct UpdatePageRequest {
     #[serde(default, deserialize_with = "double_option")]
     parent_page_id: Option<Option<Uuid>>,
     order_index: Option<i32>,
+    #[serde(default, deserialize_with = "double_option")]
+    icon: Option<Option<String>>,
 }
 
 /// Distinguishes "field absent" (None) from "field present and null" (Some(None)).
-fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<Uuid>>, D::Error>
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
     Ok(Some(Option::deserialize(deserializer)?))
 }
@@ -199,12 +216,17 @@ async fn update_page(
         Some(v) => (true, v),
         None => (false, None),
     };
+    let (set_icon, icon_value) = match body.icon {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
 
     let row: PageRow = sqlx::query_as(&format!(
         "update pages set
             title = coalesce($2, title),
             order_index = coalesce($3, order_index),
             parent_page_id = case when $4 then $5 else parent_page_id end,
+            icon = case when $6 then $7 else icon end,
             updated_at = now()
          where id = $1
          returning {PAGE_COLUMNS}"
@@ -214,6 +236,8 @@ async fn update_page(
     .bind(body.order_index)
     .bind(set_parent)
     .bind(parent_value)
+    .bind(set_icon)
+    .bind(icon_value)
     .fetch_one(&state.db)
     .await?;
 
@@ -295,7 +319,13 @@ async fn get_page(
         .await?
         .ok_or(AuthError::NotFound)?;
 
-    Ok(Json(row.into()))
+    let mut page: Page = row.into();
+    page.role = Some(match perm.role {
+        Role::Viewer => "viewer",
+        Role::Editor => "editor",
+    }.to_string());
+
+    Ok(Json(page))
 }
 
 async fn get_page_content(
@@ -335,6 +365,83 @@ async fn put_page_content(
     .await?;
 
     Ok(Json(serde_json::json!({ "message": "content saved" })))
+}
+
+async fn list_shared_pages(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+) -> Result<Json<Vec<Page>>, AuthError> {
+    let rows: Vec<PageRow> = sqlx::query_as(&format!(
+        "select {} from pages p
+         join permissions perm on perm.subject_type = 'page' and perm.subject_id = p.id
+         where perm.principal_type = 'user' and perm.principal_id = $1
+           and (perm.expires_at is null or perm.expires_at > now())
+           and p.archived_at is null
+         order by p.updated_at desc",
+        PAGE_COLUMNS
+            .split(", ")
+            .map(|c| format!("p.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+    .bind(user.user_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(Page::from).collect()))
+}
+
+async fn list_favorite_pages(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+) -> Result<Json<Vec<Page>>, AuthError> {
+    let rows: Vec<PageRow> = sqlx::query_as(&format!(
+        "select {} from pages p
+         join page_favorites f on f.page_id = p.id
+         where f.user_id = $1 and p.archived_at is null
+         order by f.created_at desc",
+        PAGE_COLUMNS
+            .split(", ")
+            .map(|c| format!("p.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+    .bind(user.user_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(Page::from).collect()))
+}
+
+async fn favorite_page(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AuthError> {
+    sqlx::query(
+        "insert into page_favorites (user_id, page_id) values ($1, $2)
+         on conflict (user_id, page_id) do nothing",
+    )
+    .bind(user.user_id)
+    .bind(id)
+    .execute(&state.db)
+    .await?;
+
+    Ok(Json(serde_json::json!({ "message": "favorited" })))
+}
+
+async fn unfavorite_page(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AuthError> {
+    sqlx::query("delete from page_favorites where user_id = $1 and page_id = $2")
+        .bind(user.user_id)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(serde_json::json!({ "message": "unfavorited" })))
 }
 
 async fn list_trash(

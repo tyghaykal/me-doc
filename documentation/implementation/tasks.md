@@ -104,6 +104,84 @@ End-to-end smoke test performed against the live stack (register → OTP via Mai
 - Version history (#32): `GET /pages/:id/versions` listed the one recorded version; `POST /pages/:id/versions/:version_id/restore` returned 200.
 - Frontend routes `/`, `/app`, `/register`, `/login` all return 200 (frontend #21's `y-websocket`/`collaboration-caret` deps installed clean, confirmed via `pnpm install` log during the rebuild — no in-browser cursor test performed, that needs two real browser tabs).
 
+## Phase 10: Notion-style app shell
+
+Companion plan: `notion-layout-redesign.md`.
+
+- [x] **#45** `PageTree.vue`: collapse/expand (`useState<Set<string>>` of collapsed node ids + chevron), drag/drop preserved
+- [x] **#46** `useRecents.ts` composable (MRU localStorage, dev-only `console.assert` self-check for cap/dedupe) + wire push into `[[pageId]].vue`'s existing `activePageId`-derived `activePage` watcher (used `activePage` instead of the raw id watcher so shared-page titles resolve correctly too)
+- [x] **#47** `AppSidebar.vue` + `SidebarRecents.vue` (switcher pill, icon row, Recents, Private tree, Trash button) — replaces `[[pageId]].vue`'s `<aside>` — *blocked by #45, #46*
+- [x] **#48** Backend `GET /me/shared-pages` handler + router wiring (`backend/src/pages/mod.rs`, joins existing `permissions` table, no schema change)
+- [x] **#49** Frontend `sharedPages`/`fetchSharedPages()` in `stores/pages.ts` + `SidebarSharedSection.vue`, wired into `AppSidebar.vue` — *blocked by #47, #48*
+- [x] **#50** `TrashModal.vue` + `stores/pages.ts` `trash`/`fetchTrash`/`restorePage` (surfaces already-existing, currently-unused trash/restore endpoints), wired to `AppSidebar.vue` — *blocked by #47*
+- [x] **#51** `AppTopbar.vue` (breadcrumb, static "Private" badge, edited date, share/copy-link, "…" menu for History+Duplicate) — replaces `[[pageId]].vue`'s `<header>`, reuses existing `shareOpen`/`historyOpen` wiring
+- [x] **#52** `SearchPalette.vue` + `pagesStore.searchPages()` (surfaces already-existing, currently-unused search endpoint), wired into `AppSidebar.vue` icon row with Ctrl/Cmd+K — *blocked by #47*
+- [x] **#53** *(stretch)* Page icon/emoji — migration `0009_page_icon.sql`, extend `Page`/`PageRow`/`PAGE_COLUMNS`/`UpdatePageRequest` (generic `double_option<T>`, was Uuid-only before), emoji-grid picker in `Editor.vue`, rendered in `PageTree.vue`/`AppTopbar.vue` — *blocked by #51*
+- [x] **#54** *(stretch)* Favorite/star — migration `0010_page_favorites.sql` (join table), `POST/DELETE /pages/:id/favorite` + `GET /me/favorite-pages` (mirrors #48), star toggle in `AppTopbar.vue`, `SidebarFavorites.vue` in `AppSidebar.vue` — *blocked by #51*
+
+**Bug found and fixed during #48 (not in original plan):** the new `/me/shared-pages` route 404'd through the single-origin nginx setup — nginx's proxy rule only forwards a hardcoded prefix allowlist (`health|auth|workspaces|pages|permissions|attachments|ws`) to the backend, and `/me` wasn't in it, so the request silently fell through to the frontend's catch-all and got Nuxt's 404. Added `me` to `nginx/conf.d/default.conf`'s regex (which explicitly documents it must mirror the backend router) and reloaded nginx.
+
+**Verification performed live** against the running docker-compose stack at `https://localhost`, using real registered test users (OTP retrieved via the Mailpit API) rather than mocks:
+- #48: shared a page from user1 to user2 via the existing `POST /pages/:id/share`; `GET /me/shared-pages` returned it for user2, empty for user1, and empty again after `DELETE /permissions/:id`.
+- #50: deleted a page via the existing archive endpoint, confirmed it appeared via `GET .../pages/trash`, restored via `PATCH /pages/:id/restore`, confirmed the trash list emptied.
+- #52: confirmed `GET /workspaces/:id/search?q=...` is reachable through nginx with the exact query shape the frontend now sends (200, empty result set — no indexed content in the test page yet, which is correct).
+- #53: `PATCH /pages/:id` with `{"icon":"🚀"}` set it, `{"icon":null}` explicitly cleared it, and an update with the `icon` field omitted left the existing value untouched — confirming the new generic `double_option` correctly distinguishes "absent" from "present and null" for a second field type (previously only proven for `Uuid` via `parent_page_id`).
+- #54: favorited a page (idempotent on a repeat call via `on conflict do nothing`), confirmed it listed via `GET /me/favorite-pages`, unfavorited, confirmed the list emptied.
+- All frontend changes verified via `docker compose logs frontend` after each edit — clean Vite HMR updates, no compile/type errors, `/app` consistently returned 200.
+
+## Phase 11: Sharing UX, export enforcement, live presence/cursors
+
+Companion plan: `sharing-presence-plan.md`.
+
+- [x] **#55** Hide Share dialog trigger from viewers — `AppTopbar.vue`'s "Private" badge gated on `!isViewer` too
+- [x] **#56** Hide Export button from viewers — `ExportMenu` gated on `!isViewer` in `AppTopbar.vue`
+- [x] **#57** Enforce export role server-side — `export/mod.rs`'s `export_page` switched from `require_membership` to `PagePermission` + `Role::Editor` check — *blocked by #56*
+- [x] **#58** Backend `GET /pages/:id/permissions` (list shares: registered users, pending invites, public links) — `sharing/mod.rs`
+- [x] **#59** Frontend "People with access" list + revoke in `ShareDialog.vue` (`listShares`/`revokeShare` in `stores/pages.ts`, reuses existing `DELETE /permissions/:id`) — *blocked by #58*
+- [x] **#60** Backend: send current `Awareness::update()` snapshot to a newly-joining WS client in `collab/mod.rs` (today only future changes are seen) + frontend CSS for `.collaboration-carets__caret`/`.collaboration-carets__label` in `main.css`
+- [x] **#61** Presence avatar stack — `Editor.vue` subscribes to `provider.awareness.on('change', ...)`, emits up through `[[pageId]].vue` into `AppTopbar.vue` — *blocked by #60*
+
+**Verification performed live** against the running docker-compose stack at `https://localhost`, using two freshly registered test accounts (OTP retrieved via the Mailpit API) — an owner and a viewer sharing one page:
+- Backend compiles clean (`cargo check` inside the `backend` container, zero warnings on touched files); frontend HMR applied all edits with no Vite/type errors.
+- #55/#56: `GET /pages/:id` as the viewer account returns `"role":"viewer"`, which drives `isViewer` in `AppTopbar.vue` — the same computed already gating the Share button now also gates the "Private" badge and `ExportMenu`.
+- #57: `GET /pages/:id/export?format=md` returned `403 {"message":"access denied"}` for the viewer and `200` (valid Markdown) for the owner — confirms the backend now enforces `Role::Editor`, not just workspace membership.
+- #58: `GET /pages/:id/permissions` returned `403` for the viewer and, for the owner, a JSON array with the exact viewer grant (`principal_type: "user"`, correct email/role/`pending`/`created_at`).
+- #59: `DELETE /permissions/:id` (reused existing route) removed the grant; a follow-up `GET /pages/:id/permissions` came back `[]`, confirming revoke works end-to-end through the new list endpoint.
+- #60/#61: verified by code inspection against the installed `yrs 0.27.3` source (`Awareness::update()`) and the installed `@tiptap/extension-collaboration-caret@3.28.0` source (confirmed it sets `provider.awareness.setLocalStateField("user", …)` and renders `.collaboration-carets__caret`/`.collaboration-carets__label`, matching the new CSS) — no rate-limit-safe way to drive two real WebSocket browser sessions from curl, so the live "two tabs, one joins late" cursor/presence-stack check from the plan still needs a manual two-browser pass.
+- Rate-limiter note (pre-existing, not part of this change): both the strict (`/auth/*`) and standard buckets refilled far slower under this verification's request bursts than their configured `per_second`/`burst_size` would suggest — every check above eventually passed on retry with backoff, so it didn't block verification, but it's worth a closer look separately.
+
+**Follow-up fix (same session, not a separate phase):** the rate-limiter note above turned out to be a real bug, not just test-harness contention — the user hit it live on `/auth/refresh`. Root cause: `tower_governor`'s `.per_second(n)`/`.per_millisecond(n)` set the replenish *period* (time between adding one token), not a request rate — `standard_conf`'s `.per_second(20)` meant one new token every 20 *seconds* (~0.05 req/s sustained), not 20 req/s, so the "generous" bucket (which `/refresh` and nearly everything else runs through) was actually far stricter than the login-only strict bucket in steady state. Fixed in `backend/src/main.rs` by switching both configs to `.per_millisecond(1000 / rate)` to express the intended rate correctly, and loosened the strict login/register bucket per request (1→5 req/s sustained, burst 8→20). Verified live: 15 rapid requests each against a general endpoint, `/auth/login`, and `/auth/refresh` all completed with zero `429`s.
+
+## Phase 12: Share management, presence avatars, comments, rich editor content
+
+Companion plan: `share-comments-editor-plan.md`.
+
+**Group A — Share dialog polish**
+- [x] **#62** Update a share's role in place — `PATCH /permissions/:id` in `sharing/mod.rs` (Editor-gated, mirrors `delete_permission`'s auth check) + `updateShareRole()` in `stores/pages.ts` + role `<select>` replacing the read-only role text in `ShareDialog.vue`'s "People with access" rows
+- [x] **#63** Auto-copy public link after generating it — `ShareDialog.vue`'s `generateLink()` calls the existing `copyLink()` on success
+- [x] **#64** Avatar-aware presence, self included — extend `auth.ts`'s `User` with `display_name`/`avatar_key` (hydrated via `GET /me` after login/register/refresh), thread `avatarUrl` through `Editor.vue`'s `currentUser`/`updatePresence()` into `AppTopbar.vue`'s avatar stack (`<img>` else initial-circle fallback), plus a new "self" chip sourced from `authStore.user` at the front of the stack
+
+**Group B — Rich editor content**
+- [x] **#65** Image resize — `Image.configure({ resize: { enabled: true, minWidth: 80, minHeight: 80 } })` in `Editor.vue`, native to the installed `@tiptap/extension-image`, config-only
+- [x] **#66** Table support via slash command — added `@tiptap/extension-table` only (its `TableKit` already bundles row/cell/header in v3.28.0 — the separate `-row`/`-cell`/`-header` packages installed first turned out redundant and were removed), "Table" entry in `slash-command.ts`, contextual `BubbleMenu` (shown when `editor.isActive('table')`) for add/delete row/column + delete table, `.ProseMirror table` CSS
+- [x] **#67** Markdown paste support — new `marked` dependency + `frontend/app/utils/markdown.ts`'s `markdownToHtml()`, wired into `Editor.vue`'s `handlePaste` for plain-text-only clipboard content (no `text/html` present)
+- [x] **#68** Import a `.txt`/`.md` file — "Import" button placed in `PageTree.vue` next to "+ New page" (not `AppSidebar.vue` — that's where page creation actually lives), reuses `markdownToHtml()`, creates a page and stages its HTML in a new `pagesStore.pendingImportHtml` map that the new page's `Editor.vue` applies via `editor.commands.setContent()` on mount — *blocked by #67*
+- [x] **#69** Markdown round-trip verification pass — no new code; see verification notes below — *blocked by #65-#68*
+
+**Group C — Comments (new subsystem)**
+- [x] **#70** Backend: `comments` table (migration `0012_comments.sql`) + `backend/src/comments/mod.rs` CRUD (`POST`/`GET /pages/:id/comments`, `PATCH /comments/:id/resolve` toggles, `DELETE /comments/:id`; any resolved role may comment, resolve/delete needs Editor or the author) + router wiring in `lib.rs`/`main.rs` + **`comments` added to `nginx/conf.d/default.conf`'s route allowlist**
+- [x] **#71** Frontend: `comment` Tiptap mark (`comment-mark.ts`, `commentId` attribute, `excludes: ''` for overlaps) — anchors via the same Y.Text formatting-attribute mechanism already used for bold/italic, survives concurrent edits with no relative-position math
+- [x] **#72** Frontend: create a comment — "Comment" button in the existing selection `BubbleMenu` (swaps the toolbar for an inline draft form), assignee input filtered against `GET /workspaces/:id/members`, applies the mark and POSTs with the same `commentId` — *blocked by #70, #71*
+- [x] **#73** Frontend: comment sidebar — new `CommentSidebar.vue` (docked right panel, not a modal, so the highlighted text stays visible) + `stores/comments.ts`, list/resolve/delete, click-to-scroll to anchor, syncs a `.comment-resolved` CSS class onto the DOM mark whenever a comment's resolved state changes — *blocked by #70, #71*
+- [x] **#74** Wire comments into the app shell — 💬 toggle button in `AppTopbar.vue`, panel in `[[pageId]].vue` — *blocked by #72, #73*
+
+**Verification performed live** against the running docker-compose stack at `https://localhost`, real registered accounts (OTP via Mailpit):
+- Backend: `cargo check` clean throughout, zero warnings on touched files. Frontend: every edit produced clean Vite HMR with no compile/type errors; `/app` and a real page route both returned 200 after the full set of changes.
+- #62: `PATCH /permissions/:id` moved a live grant viewer→editor→viewer; `GET /pages/:id/permissions` confirmed one row throughout, no duplicate.
+- #70-#73: as the **viewer** account, created a comment on the shared page and assigned it to the owner — succeeded (viewers can comment, confirmed by decision). Listed it back. As the **owner** (Editor, not the author), resolved it — `resolved: true` came back. As the **viewer** (the original author, not an Editor), deleted their own comment — succeeded, confirming the "Editor or author" policy on both ends.
+- Migration `0012_comments.sql` confirmed applied via `\d comments` — table, indexes, and FKs all present.
+- #64/#65/#66/#67/#68/#69: these are editor-UI/visual behaviors (avatar images rendering, drag-to-resize, table toolbar, typing/paste/import content, presence self+others) that can't be driven from `curl`. Verified by code inspection instead: the exact Tiptap `resize`/`TableKit`/BubbleMenu `shouldShow` APIs were confirmed against the installed `@tiptap/*@3.28.0` dist source before wiring (not guessed), and every file compiled/HMR'd cleanly. Still needs a manual in-browser pass — same caveat Phase 11 left for its two-cursor test.
+
 ## Resolved: lib.rs/main.rs duplication
 
 `main.rs` now reuses `me_doc_backend`'s module tree and `AppState` via `use me_doc_backend::{...}` instead of duplicating the module declarations and struct definition — the bin crate compiles once, off of the lib crate, dropping the earlier double-compile debt.

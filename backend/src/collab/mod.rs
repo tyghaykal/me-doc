@@ -12,6 +12,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+// `active` is an AtomicUsize (0/1) rather than AtomicBool so it pairs with the
+// existing client-counter style loads without pulling in another type.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,6 +58,9 @@ pub struct DocRoom {
     sender: broadcast::Sender<Vec<u8>>,
     clients: AtomicUsize,
     last_hash: AtomicU64,
+    /// Cleared when the room is superseded (version restore) or fully evicted.
+    /// Flush/disconnect must not write a dead room's bytes back over a restore.
+    active: AtomicUsize, // 1 = live, 0 = superseded/evicted
     _doc_sub: yrs::Subscription,
     _awareness_sub: yrs::Subscription,
 }
@@ -83,16 +88,18 @@ async fn ws_handler(
 
     // Same resolution as the REST endpoints (workspace membership, a direct
     // page/workspace grant, or a `?link=` token) — any resolved role can join
-    // the room; viewer vs. editor isn't enforced at the CRDT layer yet.
-    sharing::resolve_role(&state.db, page_id, Some(claims.sub), q.link.as_deref()).await?;
+    // the room, but only Editor may actually mutate the doc (enforced below).
+    let role = sharing::resolve_role(&state.db, page_id, Some(claims.sub), q.link.as_deref()).await?;
 
     let room = join_room(&state, page_id).await?;
 
     Ok(ws.on_upgrade(move |socket| async move {
-        handle_socket(&room, socket).await;
+        handle_socket(&room, socket, role).await;
 
         // Last client out: final persist, then evict so idle pages don't leak.
-        if room.clients.fetch_sub(1, Ordering::SeqCst) == 1 {
+        // Skip entirely when this room was superseded (e.g. version restore
+        // swapped it out) — writing its in-memory doc would clobber the restore.
+        if room.clients.fetch_sub(1, Ordering::SeqCst) == 1 && room.is_active() {
             {
                 let a = room.awareness.read().await;
                 if let Err(e) = persist_snapshot(&state.db, page_id, a.doc()).await {
@@ -103,6 +110,7 @@ async fn ws_handler(
                     tracing::error!(?e, "collab version snapshot failed");
                 }
             }
+            room.deactivate();
             // remove_if guards against a fresh client that rejoined this room
             // between our decrement and here (its increment holds the shard
             // lock, so its count is already visible).
@@ -117,16 +125,29 @@ async fn ws_handler(
 /// are fed to yrs's protocol handler (which mutates the shared doc, in turn
 /// triggering the doc observer that broadcasts to peers); outbound broadcast
 /// messages are forwarded to this client.
-async fn handle_socket(room: &Arc<DocRoom>, socket: WebSocket) {
+async fn handle_socket(room: &Arc<DocRoom>, socket: WebSocket, role: sharing::Role) {
     let (ws_sink, mut ws_stream) = socket.split();
     let sink = Arc::new(Mutex::new(ws_sink));
 
+    // Subscribe before reading any snapshot so no broadcast update can slip
+    // through the gap between capturing state and starting to listen.
+    let mut rx = room.sender.subscribe();
+
     // Initial handshake: send our state vector so the client replies with the
-    // updates we're missing (y-websocket's standard sync-step-1 on connect).
-    let step1 = {
+    // updates we're missing (y-websocket's standard sync-step-1 on connect),
+    // plus a snapshot of already-connected peers' awareness state (cursors,
+    // names) — otherwise a late joiner only sees peers who move *after* they
+    // connect.
+    let (step1, awareness_snapshot) = {
         let a = room.awareness.read().await;
         let sv = a.doc().transact().state_vector();
-        Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1()
+        let step1 = Message::Sync(SyncMessage::SyncStep1(sv)).encode_v1();
+        let snapshot = a
+            .update()
+            .ok()
+            .filter(|u| !u.clients.is_empty())
+            .map(|u| Message::Awareness(u).encode_v1());
+        (step1, snapshot)
     };
     if sink
         .lock()
@@ -137,9 +158,19 @@ async fn handle_socket(room: &Arc<DocRoom>, socket: WebSocket) {
     {
         return;
     }
+    if let Some(snapshot) = awareness_snapshot {
+        if sink
+            .lock()
+            .await
+            .send(WsMessage::Binary(snapshot))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
 
     // Writer: forward broadcast messages (peers' changes) to this client.
-    let mut rx = room.sender.subscribe();
     let writer = {
         let sink = sink.clone();
         tokio::spawn(async move {
@@ -162,6 +193,18 @@ async fn handle_socket(room: &Arc<DocRoom>, socket: WebSocket) {
             Ok(m) => m,
             Err(_) => continue,
         };
+
+        // Viewers may sync (read) and broadcast awareness (cursor presence),
+        // but never mutate the doc — a compromised/hand-rolled client could
+        // otherwise smuggle edits through SyncStep2 or a raw Update message.
+        let is_mutation = matches!(
+            msg,
+            Message::Sync(SyncMessage::Update(_)) | Message::Sync(SyncMessage::SyncStep2(_))
+        );
+        if role != sharing::Role::Editor && is_mutation {
+            continue;
+        }
+
         let reply = {
             let mut a = room.awareness.write().await;
             DefaultProtocol.handle_message(&mut a, msg)
@@ -264,9 +307,30 @@ async fn build_room(db: &PgPool, page_id: Uuid) -> Result<DocRoom, AuthError> {
         sender,
         clients: AtomicUsize::new(0),
         last_hash: AtomicU64::new(init_hash),
+        active: AtomicUsize::new(1),
         _doc_sub: doc_sub,
         _awareness_sub: awareness_sub,
     })
+}
+
+impl DocRoom {
+    fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst) != 0
+    }
+
+    fn deactivate(&self) {
+        self.active.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Drop the live collab room for `page_id` (if any) so the next websocket join
+/// rebuilds from `page_content`. Used by version restore after writing the
+/// restored bytes to the DB — without this, the in-memory room keeps serving
+/// pre-restore content and its flusher/disconnect path can overwrite the restore.
+pub fn invalidate_room(docs: &DocRegistry, page_id: Uuid) {
+    if let Some((_, room)) = docs.remove(&page_id) {
+        room.deactivate();
+    }
 }
 
 /// Per-room background task: every 5s, persist the doc if it changed since the
@@ -277,6 +341,11 @@ async fn flusher(db: PgPool, page_id: Uuid, room: Arc<DocRoom>) {
     ticker.tick().await; // consume the immediate first tick
     loop {
         ticker.tick().await;
+
+        // Superseded rooms (version restore) must not write stale bytes back.
+        if !room.is_active() {
+            break;
+        }
 
         // Encode under the lock, but persist without holding it (avoids blocking
         // edits during the DB round-trip).

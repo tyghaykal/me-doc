@@ -4,6 +4,8 @@ import { appendResponseHeader } from 'h3'
 interface User {
   id: string
   email: string
+  display_name?: string | null
+  avatar_key?: string | null
 }
 
 interface Workspace {
@@ -40,12 +42,26 @@ export const useAuthStore = defineStore('auth', () => {
     workspace.value = res.workspace
   }
 
+  // Login/register responses only carry {id, email} — fetch the full profile
+  // (display_name/avatar_key) so it's ready before any page that broadcasts
+  // presence (Editor.vue builds its awareness `user` object synchronously at
+  // setup time, so this must resolve before that component ever mounts).
+  async function fetchMe() {
+    if (!user.value) return
+    const me = await $fetch<{ id: string; email: string; display_name: string | null; avatar_key: string | null }>(
+      `${useApiBase()}/auth/me`,
+      { headers: { Authorization: `Bearer ${accessToken.value}` } },
+    )
+    user.value = { ...user.value, display_name: me.display_name, avatar_key: me.avatar_key }
+  }
+
   function register(email: string, password: string) {
     return auth<{ message: string }>('/register', { email, password })
   }
 
   async function verifyRegister(email: string, code: string) {
     applySession(await auth<AuthResponse>('/register/verify', { email, code }))
+    await fetchMe()
   }
 
   function login(email: string, password: string) {
@@ -54,6 +70,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function verifyLogin(email: string, code: string) {
     applySession(await auth<AuthResponse>('/login/verify', { email, code }))
+    await fetchMe()
   }
 
   // `headers` lets SSR-side callers (e.g. middleware/guest.ts) forward the
@@ -82,6 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (setCookie && event) appendResponseHeader(event, 'set-cookie', setCookie)
 
     applySession(response._data!)
+    await fetchMe()
   }
 
   async function logout() {
@@ -102,5 +120,6 @@ export const useAuthStore = defineStore('auth', () => {
     verifyLogin,
     refresh,
     logout,
+    fetchMe,
   }
 })

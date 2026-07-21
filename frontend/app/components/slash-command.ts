@@ -50,6 +50,33 @@ function buildCommands(onInsertImage: () => void): SlashCommandItem[] {
         editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run(),
     },
     {
+      title: 'Heading 4',
+      description: 'Extra small section heading.',
+      group: 'Basic',
+      icon: 'H4',
+      keywords: 'h4',
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setNode('heading', { level: 4 }).run(),
+    },
+    {
+      title: 'Heading 5',
+      description: 'Tiny section heading.',
+      group: 'Basic',
+      icon: 'H5',
+      keywords: 'h5',
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setNode('heading', { level: 5 }).run(),
+    },
+    {
+      title: 'Heading 6',
+      description: 'Smallest section heading.',
+      group: 'Basic',
+      icon: 'H6',
+      keywords: 'h6',
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setNode('heading', { level: 6 }).run(),
+    },
+    {
       title: 'To-do list',
       description: 'Track tasks with a checklist.',
       group: 'Lists',
@@ -107,6 +134,15 @@ function buildCommands(onInsertImage: () => void): SlashCommandItem[] {
         editor.chain().focus().deleteRange(range).run()
         onInsertImage()
       },
+    },
+    {
+      title: 'Table',
+      description: 'Insert a simple table.',
+      group: 'Blocks',
+      icon: '▦',
+      keywords: 'table grid rows columns',
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
     },
   ]
 }

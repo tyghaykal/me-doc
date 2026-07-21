@@ -43,7 +43,7 @@ async function download(ext: string) {
   <div class="relative">
     <button
       type="button"
-      class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+      class="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
       @click="open = !open"
     >
       {{ downloading ? 'Exporting…' : 'Export' }}
@@ -53,14 +53,14 @@ async function download(ext: string) {
       <div class="fixed inset-0 z-40" @click="open = false" />
       <div
         role="menu"
-        class="absolute right-0 z-50 mt-1 w-44 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        class="absolute right-0 z-50 mt-1 w-44 rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
       >
         <button
           v-for="f in formats"
           :key="f.ext"
           type="button"
           role="menuitem"
-          class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          class="block w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
           @click="download(f.ext)"
         >
           {{ f.label }}

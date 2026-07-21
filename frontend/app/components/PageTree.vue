@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PageNode } from '~/stores/pages'
+import { DEFAULT_PAGE_ICON, type PageNode } from '~/stores/pages'
 
 const props = withDefaults(defineProps<{ nodes: PageNode[]; workspaceId: string; depth?: number }>(), {
   depth: 0,
@@ -8,6 +8,14 @@ const props = withDefaults(defineProps<{ nodes: PageNode[]; workspaceId: string;
 const pagesStore = usePagesStore()
 
 const contextMenu = ref<{ x: number; y: number; node: PageNode } | null>(null)
+
+// Shared across every recursive instance of this component (same key = same state).
+const collapsed = useState<Set<string>>('pageTree-collapsed', () => new Set())
+
+function toggleCollapsed(node: PageNode) {
+  if (collapsed.value.has(node.id)) collapsed.value.delete(node.id)
+  else collapsed.value.add(node.id)
+}
 
 function select(node: PageNode) {
   pagesStore.activePageId = node.id
@@ -65,29 +73,67 @@ function addChild(parent: PageNode) {
 function addTopLevel() {
   pagesStore.createPage(props.workspaceId, { title: 'Untitled' })
 }
+
+const importInput = ref<HTMLInputElement | null>(null)
+function triggerImport() {
+  importInput.value?.click()
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+}
+
+async function onImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  const text = await file.text()
+  const isMarkdown = file.name.toLowerCase().endsWith('.md')
+  const html = isMarkdown
+    ? markdownToHtml(text)
+    : text
+        .split(/\n{2,}/)
+        .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+        .join('')
+
+  const title = file.name.replace(/\.(md|txt)$/i, '')
+  const page = await pagesStore.createPage(props.workspaceId, { title })
+  pagesStore.setPendingImport(page.id, html)
+}
 </script>
 
 <template>
   <ul
-    class="text-sm text-slate-700 dark:text-slate-300"
+    class="text-sm text-neutral-700 dark:text-neutral-300"
     :class="depth === 0 ? 'space-y-0.5' : ''"
     @dragover.prevent
     @drop="depth === 0 ? onDropRoot($event) : undefined"
   >
-    <li v-if="depth === 0" class="mb-1">
+    <li v-if="depth === 0" class="mb-1 flex items-center gap-1">
       <button
-        class="w-full rounded px-2 py-1 text-left text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        class="flex-1 rounded px-2 py-1 text-left text-xs font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         @click="addTopLevel"
       >
         + New page
       </button>
+      <button
+        type="button"
+        title="Import a .txt or .md file"
+        class="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        @click="triggerImport"
+      >
+        Import
+      </button>
+      <input ref="importInput" type="file" accept=".md,.txt" class="hidden" @change="onImportFile" />
     </li>
 
     <li v-for="node in nodes" :key="node.id">
       <div
         draggable="true"
-        class="group flex items-center gap-1 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
-        :class="pagesStore.activePageId === node.id ? 'bg-slate-100 font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100' : ''"
+        class="group flex items-center gap-1 rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        :class="pagesStore.activePageId === node.id ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100' : ''"
         :style="{ paddingLeft: `${depth * 12 + 8}px` }"
         @click="select(node)"
         @contextmenu.prevent="openContextMenu($event, node)"
@@ -95,9 +141,25 @@ function addTopLevel() {
         @dragover.prevent
         @drop="onDropOnNode($event, node)"
       >
+        <button
+          v-if="node.children.length"
+          class="shrink-0 rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+          title="Toggle children"
+          @click.stop="toggleCollapsed(node)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3 transition-transform"
+            :class="collapsed.has(node.id) ? '' : 'rotate-90'"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+        <span v-else class="w-3.5 shrink-0" />
+        <span class="shrink-0">{{ node.icon || DEFAULT_PAGE_ICON }}</span>
         <span class="flex-1 truncate">{{ node.title || 'Untitled' }}</span>
         <button
-          class="opacity-0 group-hover:opacity-100 rounded px-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-300"
+          class="opacity-0 group-hover:opacity-100 rounded px-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
           title="Add child page"
           @click.stop="addChild(node)"
         >
@@ -106,7 +168,7 @@ function addTopLevel() {
       </div>
 
       <PageTree
-        v-if="node.children.length"
+        v-if="node.children.length && !collapsed.has(node.id)"
         :nodes="node.children"
         :workspace-id="workspaceId"
         :depth="depth + 1"
@@ -119,13 +181,13 @@ function addTopLevel() {
       <div class="fixed inset-0 z-40" @click="contextMenu = null" @contextmenu.prevent="contextMenu = null" />
       <div
         role="menu"
-        class="fixed z-50 w-40 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        class="fixed z-50 w-40 rounded-md border border-neutral-200 bg-white py-1 text-sm shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
         <button
           type="button"
           role="menuitem"
-          class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          class="block w-full px-3 py-1.5 text-left text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
           @click="duplicateNode"
         >
           Duplicate
@@ -133,7 +195,7 @@ function addTopLevel() {
         <button
           type="button"
           role="menuitem"
-          class="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-slate-50 dark:text-red-400 dark:hover:bg-slate-800"
+          class="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-neutral-50 dark:text-red-400 dark:hover:bg-neutral-800"
           @click="deleteNode"
         >
           Delete
