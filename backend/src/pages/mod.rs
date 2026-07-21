@@ -515,13 +515,20 @@ async fn put_page_content(
         return Err(AuthError::Forbidden);
     }
 
+    // Keep plain_text (and its generated search_vector) in sync with every
+    // save — search matches page content via that column, so a save that
+    // only wrote yjs_state would silently leave content unsearchable.
+    let plain_text = crate::export::yjs_to_markdown(&body);
+
     sqlx::query(
-        "insert into page_content (page_id, yjs_state, updated_at)
-         values ($1, $2, now())
-         on conflict (page_id) do update set yjs_state = excluded.yjs_state, updated_at = now()",
+        "insert into page_content (page_id, yjs_state, plain_text, updated_at)
+         values ($1, $2, $3, now())
+         on conflict (page_id) do update
+           set yjs_state = excluded.yjs_state, plain_text = excluded.plain_text, updated_at = now()",
     )
     .bind(perm.page_id)
     .bind(body.as_ref())
+    .bind(&plain_text)
     .execute(&state.db)
     .await?;
 

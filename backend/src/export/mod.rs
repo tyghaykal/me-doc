@@ -96,7 +96,7 @@ async fn export_page(
 
 /// Decode a Yjs v1 update into a `Doc` and serialize its "default" XML fragment
 /// (the shared type Tiptap's Collaboration extension binds to) as Markdown.
-fn yjs_to_markdown(state: &[u8]) -> String {
+pub(crate) fn yjs_to_markdown(state: &[u8]) -> String {
     let doc = Doc::new();
     if !state.is_empty() {
         if let Ok(update) = Update::decode_v1(state) {
