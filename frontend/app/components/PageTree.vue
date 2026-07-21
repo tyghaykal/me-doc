@@ -10,12 +10,47 @@ const pagesStore = usePagesStore()
 const contextMenu = ref<{ x: number; y: number; node: PageNode } | null>(null)
 
 // Shared across every recursive instance of this component (same key = same state).
+// Ids in this set are collapsed. Parents with unloaded children default to collapsed.
 const collapsed = useState<Set<string>>('pageTree-collapsed', () => new Set())
 
-function toggleCollapsed(node: PageNode) {
-  if (collapsed.value.has(node.id)) collapsed.value.delete(node.id)
-  else collapsed.value.add(node.id)
+function isCollapsed(node: PageNode): boolean {
+  if (collapsed.value.has(node.id)) return true
+  if (expandedExplicit.value.has(node.id)) return false
+  // Default: parents with unloaded children start collapsed.
+  if (node.has_children && !node.childrenLoaded) return true
+  return false
 }
+
+function canExpand(node: PageNode): boolean {
+  // Once children are actually loaded, trust that over has_children — the
+  // backend flag can go stale after the last child is dragged elsewhere.
+  if (node.childrenLoaded) return node.children.length > 0
+  return !!node.has_children
+}
+
+async function toggleCollapsed(node: PageNode) {
+  if (isCollapsed(node)) {
+    // Expand: remove from collapsed set and load children if needed.
+    collapsed.value.delete(node.id)
+    // Mark as explicitly expanded by ensuring it's not in the set; for first
+    // expand of has_children nodes we also need a sentinel so isCollapsed
+    // doesn't keep treating them as collapsed after load.
+    collapsed.value = new Set(collapsed.value)
+    // Track expanded parents that were never in the set: use a parallel set.
+    expandedExplicit.value.add(node.id)
+    expandedExplicit.value = new Set(expandedExplicit.value)
+    if (!node.childrenLoaded) {
+      await pagesStore.fetchChildPages(node.id, { reset: true })
+    }
+  } else {
+    collapsed.value.add(node.id)
+    collapsed.value = new Set(collapsed.value)
+    expandedExplicit.value.delete(node.id)
+    expandedExplicit.value = new Set(expandedExplicit.value)
+  }
+}
+
+const expandedExplicit = useState<Set<string>>('pageTree-expanded', () => new Set())
 
 function select(node: PageNode) {
   pagesStore.activePageId = node.id
@@ -39,30 +74,159 @@ function deleteNode() {
   }
 }
 
+// Drop zone while dragging over a row: top/bottom = sibling reorder, middle = nest.
+type DropZone = 'before' | 'after' | 'into' | null
+const dropHint = ref<{ id: string; zone: DropZone } | null>(null)
+// Last non-null hint — dragleave often fires before drop and would wipe zone.
+const lastDropHint = ref<{ id: string; zone: Exclude<DropZone, null> } | null>(null)
+const draggingId = ref<string | null>(null)
+
+function zoneFromEvent(e: DragEvent, el: HTMLElement): Exclude<DropZone, null> {
+  const rect = el.getBoundingClientRect()
+  const y = e.clientY - rect.top
+  const ratio = rect.height > 0 ? y / rect.height : 0.5
+  // Wider middle band so "Make child" is easier to hit.
+  if (ratio < 0.22) return 'before'
+  if (ratio > 0.78) return 'after'
+  return 'into'
+}
+
+// A small custom drag preview instead of the browser's default full-row
+// ghost — the default ghost is exactly as wide as the row, so it always
+// covers the "Make child" pill on whatever row is underneath the cursor.
+// This pill-sized one only covers a small area near the cursor, and still
+// makes the drag visually obvious (unlike hiding the ghost entirely).
+function buildDragGhost(node: PageNode): HTMLElement {
+  const ghost = document.createElement('div')
+  ghost.textContent = `${node.icon || DEFAULT_PAGE_ICON} ${node.title || 'Untitled'}`
+  ghost.className =
+    'fixed -left-96 top-0 flex items-center gap-1 rounded border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
+  document.body.appendChild(ghost)
+  return ghost
+}
+
 function onDragStart(e: DragEvent, node: PageNode) {
+  draggingId.value = node.id
   e.dataTransfer?.setData('text/plain', node.id)
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  const ghost = buildDragGhost(node)
+  e.dataTransfer?.setDragImage(ghost, 12, 12)
+  // The browser snapshots the ghost synchronously when setDragImage runs,
+  // so it's safe to remove right after — it never needs to stay visible.
+  setTimeout(() => ghost.remove(), 0)
 }
 
-// Drop onto a node → that node becomes the new parent, appended to its children.
-function onDropOnNode(e: DragEvent, target: PageNode) {
+function onDragOverRow(e: DragEvent, target: PageNode) {
+  e.preventDefault()
   e.stopPropagation()
-  const pageId = e.dataTransfer?.getData('text/plain')
-  if (!pageId || pageId === target.id) return
-  pagesStore.updatePage(pageId, {
-    parentPageId: target.id,
-    orderIndex: target.children.length,
-  })
+  if (draggingId.value === target.id) return
+  const el = e.currentTarget as HTMLElement
+  const zone = zoneFromEvent(e, el)
+  dropHint.value = { id: target.id, zone }
+  lastDropHint.value = { id: target.id, zone }
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
 }
 
-// Drop on the root container → make top-level.
+function onDragLeaveRow(e: DragEvent, target: PageNode) {
+  const related = e.relatedTarget as Node | null
+  if (related && (e.currentTarget as HTMLElement).contains(related)) return
+  // Clear UI highlight only; keep lastDropHint for the actual drop event.
+  if (dropHint.value?.id === target.id) dropHint.value = null
+}
+
+function wouldCreateCycle(pageId: string, newParentId: string): boolean {
+  // Walking up from newParent, if we hit pageId then nesting would cycle.
+  let cur: string | null | undefined = newParentId
+  const byId = new Map(pagesStore.pages.map((p) => [p.id, p]))
+  const seen = new Set<string>()
+  while (cur) {
+    if (cur === pageId) return true
+    if (seen.has(cur)) break
+    seen.add(cur)
+    cur = byId.get(cur)?.parent_page_id ?? null
+  }
+  return false
+}
+
+async function nestAsChild(pageId: string, parent: PageNode) {
+  if (wouldCreateCycle(pageId, parent.id)) return
+  await pagesStore.updatePage(pageId, {
+    parentPageId: parent.id,
+    orderIndex: parent.children.length,
+  })
+  // Show the child under the parent immediately.
+  expandedExplicit.value.add(parent.id)
+  expandedExplicit.value = new Set(expandedExplicit.value)
+  collapsed.value.delete(parent.id)
+  collapsed.value = new Set(collapsed.value)
+  await pagesStore.fetchChildPages(parent.id, { reset: true })
+  // has_children is refreshed via fetchChildPages + mergePages
+}
+
+async function onDropOnNode(e: DragEvent, target: PageNode) {
+  e.preventDefault()
+  e.stopPropagation()
+  const pageId = e.dataTransfer?.getData('text/plain') || draggingId.value
+  const hint =
+    (dropHint.value?.id === target.id && dropHint.value.zone
+      ? dropHint.value
+      : null) ||
+    (lastDropHint.value?.id === target.id ? lastDropHint.value : null)
+  const zone = hint?.zone ?? 'after'
+  dropHint.value = null
+  lastDropHint.value = null
+  draggingId.value = null
+  if (!pageId || pageId === target.id) return
+
+  if (zone === 'into') {
+    await nestAsChild(pageId, target)
+    return
+  }
+
+  // Sibling reorder: same parent as target, order before/after target.
+  const parentId = target.parent_page_id
+  const siblings = parentId
+    ? pagesStore.pages
+        .filter((p) => p.parent_page_id === parentId)
+        .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id))
+    : pagesStore.pages
+        .filter((p) => !p.parent_page_id)
+        .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id))
+
+  const without = siblings.filter((p) => p.id !== pageId)
+  const targetIdx = without.findIndex((p) => p.id === target.id)
+  if (targetIdx < 0) return
+  const insertAt = zone === 'before' ? targetIdx : targetIdx + 1
+  const orderedIds = without.map((p) => p.id)
+  orderedIds.splice(insertAt, 0, pageId)
+
+  await Promise.all(
+    orderedIds.map((id, i) =>
+      pagesStore.updatePage(id, {
+        parentPageId: parentId ?? null,
+        orderIndex: i,
+      }),
+    ),
+  )
+}
+
 function onDropRoot(e: DragEvent) {
-  const pageId = e.dataTransfer?.getData('text/plain')
+  e.preventDefault()
+  const pageId = e.dataTransfer?.getData('text/plain') || draggingId.value
+  dropHint.value = null
+  lastDropHint.value = null
+  draggingId.value = null
   if (!pageId) return
   pagesStore.updatePage(pageId, {
     parentPageId: null,
     orderIndex: pagesStore.pageTree.length,
   })
+}
+
+function onDragEnd() {
+  dropHint.value = null
+  lastDropHint.value = null
+  draggingId.value = null
 }
 
 function addChild(parent: PageNode) {
@@ -102,6 +266,14 @@ async function onImportFile(e: Event) {
   const page = await pagesStore.createPage(props.workspaceId, { title })
   pagesStore.setPendingImport(page.id, html)
 }
+
+async function loadMoreRoots() {
+  await pagesStore.loadMoreRoots(props.workspaceId)
+}
+
+async function loadMoreChildren(parent: PageNode) {
+  await pagesStore.fetchChildPages(parent.id)
+}
 </script>
 
 <template>
@@ -132,34 +304,64 @@ async function onImportFile(e: Event) {
     <li v-for="node in nodes" :key="node.id">
       <div
         draggable="true"
-        class="group flex items-center gap-1 rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-        :class="pagesStore.activePageId === node.id ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100' : ''"
+        class="group relative flex cursor-grab items-center gap-1 rounded px-2 py-1.5 active:cursor-grabbing hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        :class="[
+          pagesStore.activePageId === node.id
+            ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+            : '',
+          draggingId === node.id ? 'opacity-50' : '',
+          dropHint?.id === node.id && dropHint.zone === 'into'
+            ? 'bg-sky-50 ring-1 ring-inset ring-sky-400 dark:bg-sky-950/40 dark:ring-sky-500'
+            : '',
+        ]"
         :style="{ paddingLeft: `${depth * 12 + 8}px` }"
         @click="select(node)"
         @contextmenu.prevent="openContextMenu($event, node)"
         @dragstart="onDragStart($event, node)"
-        @dragover.prevent
+        @dragend="onDragEnd"
+        @dragover="onDragOverRow($event, node)"
+        @dragleave="onDragLeaveRow($event, node)"
         @drop="onDropOnNode($event, node)"
       >
+        <!-- Sibling reorder indicators (top/bottom of row) -->
+        <span
+          v-if="dropHint?.id === node.id && dropHint.zone === 'before'"
+          class="pointer-events-none absolute inset-x-1 top-0 z-10 h-0.5 rounded bg-neutral-800 dark:bg-neutral-200"
+        />
+        <span
+          v-if="dropHint?.id === node.id && dropHint.zone === 'after'"
+          class="pointer-events-none absolute inset-x-1 bottom-0 z-10 h-0.5 rounded bg-neutral-800 dark:bg-neutral-200"
+        />
         <button
-          v-if="node.children.length"
-          class="shrink-0 rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+          v-if="canExpand(node)"
+          class="shrink-0 cursor-pointer rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
           title="Toggle children"
           @click.stop="toggleCollapsed(node)"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3 transition-transform"
-            :class="collapsed.has(node.id) ? '' : 'rotate-90'"
+            :class="isCollapsed(node) ? '' : 'rotate-90'"
           >
             <path d="M9 6l6 6-6 6" />
           </svg>
         </button>
         <span v-else class="w-3.5 shrink-0" />
         <span class="shrink-0">{{ node.icon || DEFAULT_PAGE_ICON }}</span>
-        <span class="flex-1 truncate">{{ node.title || 'Untitled' }}</span>
+        <!-- Title shrinks when nest label is shown so they never overlap -->
+        <span
+          class="min-w-0 flex-1 truncate"
+          :class="dropHint?.id === node.id && dropHint.zone === 'into' ? 'pr-1' : ''"
+        >{{ node.title || 'Untitled' }}</span>
+        <span
+          v-if="dropHint?.id === node.id && dropHint.zone === 'into'"
+          class="pointer-events-none shrink-0 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-sky-500"
+        >
+          Make child
+        </span>
         <button
-          class="opacity-0 group-hover:opacity-100 rounded px-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+          v-else
+          class="cursor-pointer rounded px-1 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-700 group-hover:opacity-100 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
           title="Add child page"
           @click.stop="addChild(node)"
         >
@@ -167,12 +369,42 @@ async function onImportFile(e: Event) {
         </button>
       </div>
 
-      <PageTree
-        v-if="node.children.length && !collapsed.has(node.id)"
-        :nodes="node.children"
-        :workspace-id="workspaceId"
-        :depth="depth + 1"
-      />
+      <template v-if="!isCollapsed(node) && canExpand(node)">
+        <p
+          v-if="node.childrenLoading && !node.children.length"
+          class="px-2 py-1 text-xs text-neutral-400 dark:text-neutral-500"
+          :style="{ paddingLeft: `${(depth + 1) * 12 + 8}px` }"
+        >
+          Loading…
+        </p>
+        <PageTree
+          v-if="node.children.length"
+          :nodes="node.children"
+          :workspace-id="workspaceId"
+          :depth="depth + 1"
+        />
+        <button
+          v-if="node.childrenCursor"
+          type="button"
+          class="w-full rounded px-2 py-1 text-left text-xs text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          :style="{ paddingLeft: `${(depth + 1) * 12 + 8}px` }"
+          :disabled="node.childrenLoading"
+          @click.stop="loadMoreChildren(node)"
+        >
+          {{ node.childrenLoading ? 'Loading…' : 'Load more' }}
+        </button>
+      </template>
+    </li>
+
+    <li v-if="depth === 0 && !pagesStore.rootsFullyLoaded">
+      <button
+        type="button"
+        class="w-full rounded px-2 py-1.5 text-left text-xs font-medium text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        :disabled="pagesStore.rootsLoading"
+        @click="loadMoreRoots"
+      >
+        {{ pagesStore.rootsLoading ? 'Loading…' : 'Load more pages' }}
+      </button>
     </li>
   </ul>
 

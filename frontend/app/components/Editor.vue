@@ -267,7 +267,8 @@ function openBlockMenu(x: number, y: number, selectionRange?: { from: number; to
 
 function openBlockMenuFromGrip(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  openBlockMenu(rect.right + 4, rect.top)
+  const MENU_WIDTH = 256 // matches BlockMenu.vue's w-64
+  openBlockMenu(Math.max(8, rect.left - MENU_WIDTH - 4), rect.top)
 }
 
 function activeTextSelection(): { from: number; to: number } | undefined {
@@ -410,7 +411,7 @@ watch(
 // Click a comment highlight → open that thread in the sidebar.
 function onEditorClick(e: MouseEvent) {
   const t = e.target as HTMLElement | null
-  const mark = t?.closest?.('[data-comment-id]') as HTMLElement | null
+  const mark = t?.closest?.('[data-comment-id], .comment-anchor') as HTMLElement | null
   if (!mark) return
   const id = mark.getAttribute('data-comment-id')
   if (id) emit('open-comment', id)

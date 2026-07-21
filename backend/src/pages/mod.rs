@@ -32,6 +32,10 @@ pub struct Page {
     /// populated by `get_page`, which is the only handler that knows it
     /// (others gate on workspace membership, not the page-sharing grant).
     pub role: Option<String>,
+    /// Whether this page has non-archived direct children. Set by list endpoints
+    /// that support expand-without-loading; omitted/null elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_children: Option<bool>,
 }
 
 type PageRow = (
@@ -63,8 +67,35 @@ impl From<PageRow> for Page {
             updated_at: r.9,
             icon: r.10,
             role: None,
+            has_children: None,
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PageListResponse {
+    pub items: Vec<Page>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListPagesQuery {
+    /// When set, list direct children of this page. When absent, list roots
+    /// (`parent_page_id is null`) only — never the full flat dump.
+    parent_id: Option<Uuid>,
+    /// Opaque cursor from a previous response (`order_index:id`).
+    cursor: Option<String>,
+    /// Page size (default 30, max 100).
+    limit: Option<i64>,
+}
+
+fn encode_cursor(order_index: i32, id: Uuid) -> String {
+    format!("{order_index}:{id}")
+}
+
+fn decode_cursor(cursor: &str) -> Option<(i32, Uuid)> {
+    let (oi, id) = cursor.split_once(':')?;
+    Some((oi.parse().ok()?, id.parse().ok()?))
 }
 
 const PAGE_COLUMNS: &str = "id, workspace_id, parent_page_id, title, slug, order_index, archived_at, created_by, created_at, updated_at, icon";
@@ -183,19 +214,147 @@ async fn list_pages(
     State(state): State<AppState>,
     user: AuthenticatedUser,
     Path(workspace_id): Path<Uuid>,
-) -> Result<Json<Vec<Page>>, AuthError> {
+    Query(query): Query<ListPagesQuery>,
+) -> Result<Json<PageListResponse>, AuthError> {
     require_membership(&state.db, workspace_id, user.user_id).await?;
 
-    let rows: Vec<PageRow> = sqlx::query_as(&format!(
-        "select {PAGE_COLUMNS} from pages
-         where workspace_id = $1 and archived_at is null
-         order by order_index asc"
-    ))
-    .bind(workspace_id)
-    .fetch_all(&state.db)
-    .await?;
+    let limit = query.limit.unwrap_or(30).clamp(1, 100);
+    // Fetch one extra row to know whether a next page exists.
+    let fetch = limit + 1;
 
-    Ok(Json(rows.into_iter().map(Page::from).collect()))
+    let cursor_pair: Option<(i32, Uuid)> = match query.cursor.as_deref() {
+        None => None,
+        Some(c) => Some(
+            decode_cursor(c).ok_or_else(|| AuthError::Validation("invalid cursor".into()))?,
+        ),
+    };
+
+    // sqlx needs typed binds; branch on parent + cursor rather than dynamic SQL soup.
+    type ListRow = (
+        Uuid,
+        Uuid,
+        Option<Uuid>,
+        String,
+        String,
+        i32,
+        Option<DateTime<Utc>>,
+        Uuid,
+        DateTime<Utc>,
+        DateTime<Utc>,
+        Option<String>,
+        bool,
+    );
+
+    let rows: Vec<ListRow> = match (query.parent_id, cursor_pair) {
+        (None, None) => {
+            sqlx::query_as(
+                "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        exists(
+                          select 1 from pages c
+                          where c.parent_page_id = p.id and c.archived_at is null
+                        ) as has_children
+                 from pages p
+                 where p.workspace_id = $1
+                   and p.parent_page_id is null
+                   and p.archived_at is null
+                 order by p.order_index asc, p.id asc
+                 limit $2",
+            )
+            .bind(workspace_id)
+            .bind(fetch)
+            .fetch_all(&state.db)
+            .await?
+        }
+        (None, Some((oi, id))) => {
+            sqlx::query_as(
+                "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        exists(
+                          select 1 from pages c
+                          where c.parent_page_id = p.id and c.archived_at is null
+                        ) as has_children
+                 from pages p
+                 where p.workspace_id = $1
+                   and p.parent_page_id is null
+                   and p.archived_at is null
+                   and (p.order_index, p.id) > ($2, $3)
+                 order by p.order_index asc, p.id asc
+                 limit $4",
+            )
+            .bind(workspace_id)
+            .bind(oi)
+            .bind(id)
+            .bind(fetch)
+            .fetch_all(&state.db)
+            .await?
+        }
+        (Some(parent_id), None) => {
+            sqlx::query_as(
+                "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        exists(
+                          select 1 from pages c
+                          where c.parent_page_id = p.id and c.archived_at is null
+                        ) as has_children
+                 from pages p
+                 where p.workspace_id = $1
+                   and p.parent_page_id = $2
+                   and p.archived_at is null
+                 order by p.order_index asc, p.id asc
+                 limit $3",
+            )
+            .bind(workspace_id)
+            .bind(parent_id)
+            .bind(fetch)
+            .fetch_all(&state.db)
+            .await?
+        }
+        (Some(parent_id), Some((oi, id))) => {
+            sqlx::query_as(
+                "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        exists(
+                          select 1 from pages c
+                          where c.parent_page_id = p.id and c.archived_at is null
+                        ) as has_children
+                 from pages p
+                 where p.workspace_id = $1
+                   and p.parent_page_id = $2
+                   and p.archived_at is null
+                   and (p.order_index, p.id) > ($3, $4)
+                 order by p.order_index asc, p.id asc
+                 limit $5",
+            )
+            .bind(workspace_id)
+            .bind(parent_id)
+            .bind(oi)
+            .bind(id)
+            .bind(fetch)
+            .fetch_all(&state.db)
+            .await?
+        }
+    };
+
+    let mut items: Vec<Page> = rows
+        .into_iter()
+        .map(|r| {
+            let mut p = Page::from((
+                r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10,
+            ));
+            p.has_children = Some(r.11);
+            p
+        })
+        .collect();
+
+    let next_cursor = if items.len() as i64 > limit {
+        items.pop();
+        items.last().map(|p| encode_cursor(p.order_index, p.id))
+    } else {
+        None
+    };
+
+    Ok(Json(PageListResponse { items, next_cursor }))
 }
 
 async fn update_page(
@@ -313,11 +472,13 @@ async fn get_page(
     State(state): State<AppState>,
     perm: PagePermission,
 ) -> Result<Json<Page>, AuthError> {
-    let row: PageRow = sqlx::query_as(&format!("select {PAGE_COLUMNS} from pages where id = $1"))
-        .bind(perm.page_id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AuthError::NotFound)?;
+    let row: PageRow = sqlx::query_as(&format!(
+        "select {PAGE_COLUMNS} from pages where id = $1 and archived_at is null"
+    ))
+    .bind(perm.page_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AuthError::NotFound)?;
 
     let mut page: Page = row.into();
     page.role = Some(match perm.role {
@@ -536,21 +697,68 @@ async fn search_pages(
 ) -> Result<Json<Vec<Page>>, AuthError> {
     require_membership(&state.db, workspace_id, user.user_id).await?;
 
+    let q = query.q.trim();
+    if q.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    let like = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+    let cols = PAGE_COLUMNS
+        .split(", ")
+        .map(|c| format!("p.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Postgres rejects SELECT DISTINCT ... ORDER BY p.updated_at when updated_at
+    // isn't in the DISTINCT select list — use a subquery + DISTINCT ON instead.
+    // Cap at 50 — palette UX, not a full export.
     let rows: Vec<PageRow> = sqlx::query_as(&format!(
-        "select {} from pages p
-         join page_content pc on pc.page_id = p.id
-         where p.workspace_id = $1
-           and p.archived_at is null
-           and pc.search_vector @@ plainto_tsquery('english', $2)
-         order by ts_rank(pc.search_vector, plainto_tsquery('english', $2)) desc",
-        PAGE_COLUMNS
-            .split(", ")
-            .map(|c| format!("p.{c}"))
-            .collect::<Vec<_>>()
-            .join(", ")
+        "select {cols} from (
+           select distinct on (p.id) {cols}
+           from pages p
+           left join page_content pc on pc.page_id = p.id
+           left join users creator on creator.id = p.created_by
+           where p.workspace_id = $1
+             and p.archived_at is null
+             and (
+               p.title ilike $2 escape '\\'
+               or coalesce(pc.plain_text, '') ilike $2 escape '\\'
+               or (
+                 pc.search_vector is not null
+                 and length(trim($3)) > 0
+                 and pc.search_vector @@ plainto_tsquery('english', $3)
+               )
+               or creator.email ilike $2 escape '\\'
+               or coalesce(creator.display_name, '') ilike $2 escape '\\'
+               or exists (
+                 select 1 from permissions perm
+                 join users u on u.id = perm.principal_id
+                 where perm.subject_type = 'page' and perm.subject_id = p.id
+                   and perm.principal_type = 'user'
+                   and (perm.expires_at is null or perm.expires_at > now())
+                   and (
+                     u.email ilike $2 escape '\\'
+                     or coalesce(u.display_name, '') ilike $2 escape '\\'
+                   )
+               )
+               or exists (
+                 select 1 from comments c
+                 join users u on u.id = c.author_id
+                 where c.page_id = p.id
+                   and (
+                     u.email ilike $2 escape '\\'
+                     or coalesce(u.display_name, '') ilike $2 escape '\\'
+                   )
+               )
+             )
+           order by p.id, p.updated_at desc
+         ) p
+         order by p.updated_at desc
+         limit 50"
     ))
     .bind(workspace_id)
-    .bind(&query.q)
+    .bind(&like)
+    .bind(q)
     .fetch_all(&state.db)
     .await?;
 

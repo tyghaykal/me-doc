@@ -11,6 +11,10 @@ export function pushRecent(list: RecentEntry[], entry: RecentEntry, cap = CAP): 
   return [entry, ...list.filter((e) => e.id !== entry.id)].slice(0, cap)
 }
 
+export function pruneRecents(list: RecentEntry[], validIds: Set<string>): RecentEntry[] {
+  return list.filter((e) => validIds.has(e.id))
+}
+
 export function useRecents() {
   const recents = useState<RecentEntry[]>('recents', () => {
     if (!import.meta.client) return []
@@ -22,12 +26,28 @@ export function useRecents() {
     }
   })
 
-  function record(entry: RecentEntry) {
-    recents.value = pushRecent(recents.value, entry)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(recents.value))
+  function persist(next: RecentEntry[]) {
+    recents.value = next
+    if (import.meta.client) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    }
   }
 
-  return { recents, record }
+  function record(entry: RecentEntry) {
+    persist(pushRecent(recents.value, entry))
+  }
+
+  function remove(id: string) {
+    persist(recents.value.filter((e) => e.id !== id))
+  }
+
+  /** Drop entries whose page id is not in the known live set (deleted/archived). */
+  function prune(validIds: Set<string>) {
+    const next = pruneRecents(recents.value, validIds)
+    if (next.length !== recents.value.length) persist(next)
+  }
+
+  return { recents, record, remove, prune }
 }
 
 if (import.meta.dev && import.meta.client) {
@@ -41,4 +61,13 @@ if (import.meta.dev && import.meta.client) {
     { id: '1', title: 'A (renamed)', icon: '🔥' },
   )
   console.assert(deduped.length === 1 && deduped[0].title === 'A (renamed)', 'useRecents: re-visiting a page should dedupe, not duplicate')
+
+  const pruned = pruneRecents(
+    [
+      { id: '1', title: 'keep', icon: null },
+      { id: '2', title: 'gone', icon: null },
+    ],
+    new Set(['1']),
+  )
+  console.assert(pruned.length === 1 && pruned[0].id === '1', 'useRecents: prune should drop unknown ids')
 }

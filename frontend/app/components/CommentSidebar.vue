@@ -167,6 +167,7 @@ watch(
           'comment-highlight-active',
           !!props.focusedMarkId && props.focusedMarkId === c.mark_id,
         )
+        // class name kept for CSS active state on .comment-anchor
       })
     }
   },

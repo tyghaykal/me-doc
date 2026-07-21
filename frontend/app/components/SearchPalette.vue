@@ -14,6 +14,8 @@ const pagesStore = usePagesStore()
 const query = ref('')
 const results = ref<Page[]>([])
 const loading = ref(false)
+const error = ref<string | null>(null)
+const inputRef = ref<HTMLInputElement | null>(null)
 let debounceId: ReturnType<typeof setTimeout> | undefined
 
 function close() {
@@ -28,11 +30,16 @@ function select(page: Page) {
 async function runSearch(q: string) {
   if (!q.trim()) {
     results.value = []
+    error.value = null
     return
   }
   loading.value = true
+  error.value = null
   try {
     results.value = await pagesStore.searchPages(props.workspaceId, q)
+  } catch (e: any) {
+    results.value = []
+    error.value = e?.data?.message ?? e?.message ?? 'Search failed.'
   } finally {
     loading.value = false
   }
@@ -45,11 +52,17 @@ watch(query, (q) => {
 
 watch(
   () => props.open,
-  (isOpen) => {
+  async (isOpen) => {
     if (!isOpen) {
       query.value = ''
       results.value = []
+      error.value = null
+      return
     }
+    await nextTick()
+    inputRef.value?.focus()
+    // Teleport + v-if: one more frame after paint
+    requestAnimationFrame(() => inputRef.value?.focus())
   },
 )
 </script>
@@ -69,23 +82,24 @@ watch(
         @keydown.esc="close"
       >
         <input
+          ref="inputRef"
           v-model="query"
           type="text"
-          autofocus
-          placeholder="Search pages…"
+          placeholder="Search title, content, people…"
           class="w-full border-b border-neutral-200 bg-transparent px-4 py-3 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-neutral-800 dark:text-neutral-100"
         />
 
         <p v-if="loading" class="px-4 py-3 text-sm text-neutral-500 dark:text-neutral-400">Searching…</p>
+        <p v-else-if="error" class="px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
         <p v-else-if="query && results.length === 0" class="px-4 py-3 text-sm text-neutral-500 dark:text-neutral-400">
           No matches.
         </p>
 
-        <ul v-else-if="results.length" class="max-h-80 overflow-y-auto py-1">
+        <ul v-else-if="results.length" class="thin-scrollbar max-h-80 overflow-y-auto py-1">
           <li v-for="page in results" :key="page.id">
             <button
               type="button"
-              class="flex w-full items-center gap-2 truncate px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              class="flex w-full cursor-pointer items-center gap-2 truncate px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
               @click="select(page)"
             >
               <span class="shrink-0">{{ page.icon || DEFAULT_PAGE_ICON }}</span>

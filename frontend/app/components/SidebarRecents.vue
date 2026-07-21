@@ -2,10 +2,16 @@
 import { DEFAULT_PAGE_ICON } from '~/stores/pages'
 
 const pagesStore = usePagesStore()
-const { recents } = useRecents()
+const { recents, remove } = useRecents()
 
-function select(id: string) {
-  pagesStore.activePageId = id
+async function select(id: string) {
+  // Verify the page still exists / isn't archived before opening.
+  try {
+    await pagesStore.fetchPage(id)
+    pagesStore.activePageId = id
+  } catch {
+    remove(id)
+  }
 }
 </script>
 

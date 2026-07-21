@@ -14,8 +14,14 @@ const historyOpen = ref(false)
 // Bumped after a version restore so <Editor> remounts with a fresh Y.Doc that
 // re-syncs from the restored page_content (and a new collab room on the server).
 const editorEpoch = ref(0)
+const editorLoading = ref(false)
 const commentsOpen = ref(false)
 const focusedCommentMarkId = ref<string | null>(null)
+
+function onEditorReady(ed: Editor | null) {
+  editorInstance.value = ed
+  if (ed) editorLoading.value = false
+}
 
 function onVersionRestored() {
   editorEpoch.value += 1
@@ -57,9 +63,10 @@ const presentUsers = ref<
 >([])
 watch(
   () => activePage.value?.id,
-  () => {
+  (id) => {
     presentUsers.value = []
     editorInstance.value = null
+    editorLoading.value = !!id
   },
 )
 
@@ -122,9 +129,13 @@ watch(
   },
 )
 
+const { prune: pruneRecents } = useRecents()
+
 onMounted(async () => {
   if (!authStore.workspace) return
   await pagesStore.fetchPages(authStore.workspace.id)
+  await Promise.all([pagesStore.fetchSharedPages(), pagesStore.fetchFavoritePages()])
+  pruneRecents(pagesStore.knownPageIds())
   await workspacesStore.fetchAll()
   const savedId = localStorage.getItem('activeWorkspaceId')
   if (savedId && savedId !== authStore.workspace.id) {
@@ -135,10 +146,12 @@ onMounted(async () => {
 
 watch(
   () => authStore.workspace?.id,
-  (id, old) => {
+  async (id, old) => {
     if (id && old && id !== old) {
       pagesStore.activePageId = null
-      pagesStore.fetchPages(id)
+      await pagesStore.fetchPages(id)
+      await Promise.all([pagesStore.fetchSharedPages(), pagesStore.fetchFavoritePages()])
+      pruneRecents(pagesStore.knownPageIds())
     }
   },
 )
@@ -189,20 +202,37 @@ watch(
         -->
         <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
           <div class="min-w-0 w-full max-w-3xl">
-            <p v-if="!activePage" class="text-neutral-500 dark:text-neutral-400">Select a page from the sidebar.</p>
-            <Editor
-              v-else
-              :key="`${activePage.id}:${editorEpoch}`"
-              :page-id="activePage.id"
-              :workspace-id="activePage.workspace_id"
-              :title="activePage.title"
-              :icon="activePage.icon"
-              :link-token="linkToken"
-              :read-only="activePage.role === 'viewer'"
-              @presence-change="presentUsers = $event"
-              @editor-ready="editorInstance = $event"
-              @open-comment="openComments($event)"
-            />
+            <template v-if="!activePage">
+              <PageHomeList
+                v-if="authStore.workspace"
+                :workspace-id="authStore.workspace.id"
+              />
+              <p v-else class="text-neutral-500 dark:text-neutral-400">Select a page from the sidebar.</p>
+            </template>
+            <div v-else class="relative">
+              <div
+                v-if="editorLoading"
+                class="absolute inset-0 z-10 flex min-h-[40vh] flex-col items-center justify-center gap-3 bg-white/80 dark:bg-neutral-900/80"
+              >
+                <div
+                  class="h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-800 dark:border-neutral-600 dark:border-t-neutral-200"
+                  aria-hidden="true"
+                />
+                <p class="text-sm text-neutral-500 dark:text-neutral-400">Loading document…</p>
+              </div>
+              <Editor
+                :key="`${activePage.id}:${editorEpoch}`"
+                :page-id="activePage.id"
+                :workspace-id="activePage.workspace_id"
+                :title="activePage.title"
+                :icon="activePage.icon"
+                :link-token="linkToken"
+                :read-only="activePage.role === 'viewer'"
+                @presence-change="presentUsers = $event"
+                @editor-ready="onEditorReady"
+                @open-comment="openComments($event)"
+              />
+            </div>
           </div>
 
           <TableOfContents

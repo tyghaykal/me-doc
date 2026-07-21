@@ -453,39 +453,38 @@ html {
   background-color: #f5f5f5;
 }
 
-/* Comment anchors */
-.comment-highlight {
-  background-color: rgb(250 204 21 / 0.35); /* yellow-400 */
-  border-bottom: 2px solid rgb(202 138 4 / 0.6); /* yellow-600 */
+/* Comment anchors — icon on the right of the range, no text recolor */
+.comment-anchor {
   cursor: pointer;
-  border-radius: 0.1em;
+  text-decoration: none;
+  background: transparent;
+  color: inherit;
+  position: relative;
 }
 
-.comment-highlight:hover {
-  background-color: rgb(250 204 21 / 0.5);
+/* Only decorate the last fragment of a multi-node mark range if possible;
+   for a single span, icon sits after the text. */
+.comment-anchor::after {
+  content: '💬';
+  font-size: 0.7em;
+  margin-left: 0.2em;
+  opacity: 0.75;
+  vertical-align: super;
+  line-height: 0;
 }
 
-.dark .comment-highlight {
-  background-color: rgb(250 204 21 / 0.2);
+.comment-anchor:hover::after {
+  opacity: 1;
 }
 
-.dark .comment-highlight:hover {
-  background-color: rgb(250 204 21 / 0.35);
+.comment-anchor.comment-highlight-active::after {
+  opacity: 1;
+  filter: drop-shadow(0 0 2px rgb(251 191 36 / 0.8));
 }
 
-.comment-highlight.comment-highlight-active {
-  background-color: rgb(251 191 36 / 0.55); /* amber-400 */
-  box-shadow: 0 0 0 2px rgb(251 191 36 / 0.45);
-}
-
-.dark .comment-highlight.comment-highlight-active {
-  background-color: rgb(251 191 36 / 0.35);
-  box-shadow: 0 0 0 2px rgb(251 191 36 / 0.35);
-}
-
-.comment-highlight.comment-resolved {
-  background-color: rgb(163 163 163 / 0.2); /* neutral-400 */
-  border-bottom-color: rgb(163 163 163 / 0.5);
+.comment-anchor.comment-resolved::after {
+  opacity: 0.35;
+  filter: grayscale(1);
 }
 
 /* Thin scrollbars (Firefox + Chromium/WebKit) */
