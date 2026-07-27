@@ -21,6 +21,8 @@ import { CommentMark } from './comment-mark'
 import { DefinitionList, DefinitionTerm, DefinitionDescription } from './definition-list'
 import { AbbrMark } from './abbr-mark'
 import { ContainerNode } from './container-node'
+import { DiagramNode } from './diagram-node'
+import { DiagramEmbed } from './diagram-embed'
 import { DEFAULT_PAGE_ICON } from '~/stores/pages'
 
 const props = defineProps<{
@@ -161,6 +163,20 @@ function onImageInputChange(e: Event) {
   const files = Array.from((e.target as HTMLInputElement).files ?? [])
   if (files.length) insertImages(files)
   ;(e.target as HTMLInputElement).value = ''
+}
+
+// --- Slash-command diagram embed (opens the diagram picker) ---
+const diagramPickerOpen = ref(false)
+function openDiagramPicker() {
+  diagramPickerOpen.value = true
+}
+function insertDiagramEmbed(diagram: { id: string; title: string }) {
+  diagramPickerOpen.value = false
+  editor.value
+    ?.chain()
+    .focus()
+    .insertContent({ type: 'diagramEmbed', attrs: { diagramId: diagram.id, title: diagram.title } })
+    .run()
 }
 
 // --- Drag handle / block menu ---
@@ -356,8 +372,10 @@ const editor = useEditor({
     DefinitionDescription,
     AbbrMark,
     ContainerNode,
+    DiagramNode,
+    DiagramEmbed,
     CommentMark,
-    SlashCommand.configure({ onInsertImage: triggerImagePicker }),
+    SlashCommand.configure({ onInsertImage: triggerImagePicker, onEmbedDiagram: openDiagramPicker }),
   ],
   editorProps: {
     // pl-12 lives here (on .ProseMirror itself), not on the wrapper div below,
@@ -492,6 +510,13 @@ onBeforeUnmount(() => {
     />
 
     <input ref="imageInput" type="file" accept="image/*" class="hidden" @change="onImageInputChange" />
+
+    <DiagramPicker
+      v-if="diagramPickerOpen"
+      :workspace-id="workspaceId"
+      @pick="insertDiagramEmbed"
+      @close="diagramPickerOpen = false"
+    />
 
     <div
       v-if="editor"

@@ -14,6 +14,7 @@ export interface Page {
   created_at: string
   updated_at: string
   icon: string | null
+  kind: 'document' | 'diagram'
   role: string | null
   has_children?: boolean | null
 }
@@ -215,6 +216,10 @@ export const usePagesStore = defineStore('pages', () => {
     favoritePages.value = favoritePages.value.filter((p) => p.id !== pageId)
   }
 
+  async function fetchDiagrams(workspaceId: string) {
+    return api<Page[]>(`/workspaces/${workspaceId}/diagrams`)
+  }
+
   async function searchPages(workspaceId: string, q: string) {
     return api<Page[]>(`/workspaces/${workspaceId}/search`, { query: { q } })
   }
@@ -236,11 +241,11 @@ export const usePagesStore = defineStore('pages', () => {
 
   async function createPage(
     workspaceId: string,
-    opts: { title?: string; parentPageId?: string } = {},
+    opts: { title?: string; parentPageId?: string; kind?: 'document' | 'diagram' } = {},
   ) {
     const page = await api<Page>(`/workspaces/${workspaceId}/pages`, {
       method: 'POST',
-      body: { title: opts.title, parent_page_id: opts.parentPageId },
+      body: { title: opts.title, parent_page_id: opts.parentPageId, kind: opts.kind },
     })
     if (opts.parentPageId) {
       await fetchChildPages(opts.parentPageId, { reset: true })
@@ -361,6 +366,7 @@ export const usePagesStore = defineStore('pages', () => {
     favoritePage,
     unfavoritePage,
     searchPages,
+    fetchDiagrams,
     fetchTrash,
     restorePage,
     createPage,

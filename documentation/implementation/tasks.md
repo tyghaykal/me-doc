@@ -185,3 +185,38 @@ Companion plan: `share-comments-editor-plan.md`.
 ## Resolved: lib.rs/main.rs duplication
 
 `main.rs` now reuses `me_doc_backend`'s module tree and `AppState` via `use me_doc_backend::{...}` instead of duplicating the module declarations and struct definition — the bin crate compiles once, off of the lib crate, dropping the earlier double-compile debt.
+
+## Phase 12: Collaborative diagrams + real-time comments
+
+Companion to `diagrams-comments-plan.md`. Diagrams reuse the whole page subsystem
+(`pages.kind='diagram'`); the only new backend surface is the comments WS fan-out.
+
+**Phase A — Real-time comments (WebSocket)**
+- [x] **#75** Backend `CommentHub` in `AppState` + `comments/realtime.rs` (`GET /ws/comments/:id`, JWT + `resolve_role` gate, in-process `broadcast` fan-out)
+- [x] **#76** Publish typed events (`created`/`updated`/`deleted`) from the four comment mutations in `comments/mod.rs` — *blocked by #75*
+- [x] **#77** Frontend `useCommentStream` composable + idempotent `applyEvent`/upsert in `stores/comments.ts`, mounted in the app shell — *blocked by #76*
+
+**Phase B — Diagram core (text + preview + collab, standalone + inline)**
+- [x] **#78** Migration `0014_page_kind.sql` + `kind` through `create/list/get/duplicate/list_diagrams` in `pages/mod.rs`
+- [x] **#79** `mermaid` dep + `utils/diagram/mermaid.ts` (lazy render/parse/type-detect, theme-synced)
+- [x] **#80** `useCollab` composable (provider + presence) — shared by diagram page and embed — *blocked by #79*
+- [x] **#81** `DiagramEditor` + `DiagramCodePane` + `DiagramCanvas` + `DiagramToolbar` + `bindYText` (Y.Text↔ref minimal-diff) — *blocked by #79, #80*
+- [x] **#82** `DiagramPage` container + app-shell renders it for `kind==='diagram'` + sidebar "+ Diagram" — *blocked by #81*
+- [x] **#83** Inline `diagram` TipTap node + `DiagramNodeView` + `/diagram` slash entry, registered in `Editor.vue` — *blocked by #81*
+- [x] **#84** Export: `diagram` → ```mermaid``` fence in `export/mod.rs`; diagram-page `plain_text` via `yjs_named_text("source")` for search — *blocked by #78, #83*
+
+**Phase C — Visual drag-drop (Vue Flow + adapters)**
+- [x] **#85** `@vue-flow/*` deps + adapter registry (`utils/diagram/adapters/`) — *blocked by #81*
+- [x] **#86** `flowchart` adapter (parse + generate, round-trip stable — verified via assert check) — *blocked by #85*
+- [x] **#87** `DiagramFlow` Vue Flow canvas (add/connect/delete/relabel → regenerate source; auto-layout; drag-reposition) wired into `DiagramEditor`'s Diagram view — *blocked by #86*
+
+**Phase D — Live-linked embedding**
+- [x] **#88** `diagramEmbed` node + `DiagramEmbedView` (read-only render, live via read-only `useCollab` subscription) — *blocked by #81, #80*
+- [x] **#89** `GET /workspaces/:id/diagrams` + `DiagramPicker` + `/embed diagram` slash entry in `Editor.vue` — *blocked by #88*
+- [x] **#90** Export: `diagramEmbed` → link placeholder in `export/mod.rs` — *blocked by #88, #84*
+
+**Verification performed** against the running docker-compose stack:
+- Backend `cargo` recompiled clean throughout (cargo-watch); migration `0014` confirmed applied (`pages.kind` present). New routes wired: `/health` 200, `/ws/comments/:id` rejects non-upgrade/no-token, `/workspaces/:id/diagrams` enforces auth (401). nginx allowlist already covers `ws`/`workspaces` with WS upgrade headers.
+- Frontend: every edit produced clean Vite HMR; `/app` and all diagram modules (`DiagramFlow.vue`, `DiagramEditor.vue`, adapters) transform 200 with no resolve/compile errors. `mermaid` + `@vue-flow/*` installed.
+- Flowchart adapter round-trip verified with an assert script (parse→generate→parse stable; non-flowchart declined).
+- **Still needs a manual in-browser pass** (same caveat as Phase 11): two-browser live comments, diagram co-editing, Vue Flow drag/connect interactions, and live embed propagation.

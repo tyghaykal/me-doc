@@ -120,6 +120,22 @@ pub(crate) fn yjs_to_markdown(state: &[u8]) -> String {
     }
 }
 
+/// Reads a top-level named `Y.Text` out of an encoded Yjs update — used for
+/// diagram pages, whose Mermaid source lives in a `Text` (not the XML fragment
+/// documents use). Returns "" when absent/empty.
+pub(crate) fn yjs_named_text(state: &[u8], name: &str) -> String {
+    let doc = Doc::new();
+    if !state.is_empty() {
+        if let Ok(update) = Update::decode_v1(state) {
+            let mut txn = doc.transact_mut();
+            let _ = txn.apply_update(update);
+        }
+    }
+    let text = doc.get_or_insert_text(name);
+    let txn = doc.transact();
+    text.get_string(&txn)
+}
+
 fn render_block<T: ReadTxn>(node: &XmlOut, txn: &T, out: &mut String) {
     match node {
         XmlOut::Element(el) => render_element_block(el, txn, out),
@@ -189,6 +205,19 @@ fn render_element_block<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut Strin
         "image" => {
             render_image(el, txn, out);
             out.push_str("\n\n");
+        }
+        // Inline diagram block: Mermaid source lives in the `source` attribute.
+        "diagram" => {
+            let source = attr_str(el, txn, "source").unwrap_or_default();
+            out.push_str("```mermaid\n");
+            out.push_str(source.trim_end_matches('\n'));
+            out.push_str("\n```\n\n");
+        }
+        // Live embed of a standalone diagram page. The walker has no DB access,
+        // so it can't inline the referenced source — emit a link placeholder.
+        "diagramEmbed" => {
+            let id = attr_str(el, txn, "diagramId").unwrap_or_default();
+            out.push_str(&format!("[Embedded diagram](/app/{id})\n\n"));
         }
         // Unknown block: recurse so nested text is never silently dropped.
         _ => {

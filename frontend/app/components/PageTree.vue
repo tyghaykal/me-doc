@@ -56,6 +56,52 @@ function select(node: PageNode) {
   pagesStore.activePageId = node.id
 }
 
+// Keep the open page visible in the tree: explicitly expand its ancestor chain
+// whenever it changes. Without this, a parent stays open only via the fragile
+// "children happen to be loaded" default, so navigating to a sub-page (or its
+// parent then back) could let the parent silently collapse and hide the child.
+async function revealActive(id: string | null) {
+  if (props.depth !== 0 || !id) return
+  const byId = new Map(pagesStore.pages.map((p) => [p.id, p]))
+  const ancestors: string[] = []
+  const seen = new Set<string>()
+  let cur = byId.get(id)?.parent_page_id ?? null
+  while (cur && !seen.has(cur)) {
+    seen.add(cur)
+    ancestors.push(cur)
+    cur = byId.get(cur)?.parent_page_id ?? null
+  }
+  if (!ancestors.length) return
+
+  let changed = false
+  for (const pid of ancestors) {
+    if (collapsed.value.has(pid)) {
+      collapsed.value.delete(pid)
+      changed = true
+    }
+    if (!expandedExplicit.value.has(pid)) {
+      expandedExplicit.value.add(pid)
+      changed = true
+    }
+    // Load the branch so the active page's node actually exists under it.
+    if (!pagesStore.childrenLoadedParents.has(pid)) {
+      await pagesStore.fetchChildPages(pid, { reset: true })
+    }
+  }
+  if (changed) {
+    collapsed.value = new Set(collapsed.value)
+    expandedExplicit.value = new Set(expandedExplicit.value)
+  }
+}
+
+// Re-run when the open page changes and when pages first load (direct-URL open
+// sets the active id before the tree is fetched).
+watch(
+  () => [pagesStore.activePageId, pagesStore.pages.length] as const,
+  () => revealActive(pagesStore.activePageId),
+  { immediate: true },
+)
+
 function openContextMenu(e: MouseEvent, node: PageNode) {
   contextMenu.value = { x: e.clientX, y: e.clientY, node }
 }
@@ -238,6 +284,10 @@ function addTopLevel() {
   pagesStore.createPage(props.workspaceId, { title: 'Untitled' })
 }
 
+function addDiagram() {
+  pagesStore.createPage(props.workspaceId, { title: 'Untitled diagram', kind: 'diagram' })
+}
+
 const importInput = ref<HTMLInputElement | null>(null)
 function triggerImport() {
   importInput.value?.click()
@@ -289,6 +339,14 @@ async function loadMoreChildren(parent: PageNode) {
         @click="addTopLevel"
       >
         + New page
+      </button>
+      <button
+        type="button"
+        title="New diagram"
+        class="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        @click="addDiagram"
+      >
+        + Diagram
       </button>
       <button
         type="button"

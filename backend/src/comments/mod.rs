@@ -11,11 +11,22 @@ use crate::auth::{error::AuthError, extractor::AuthenticatedUser};
 use crate::sharing::{self, PagePermission, Role};
 use crate::AppState;
 
+pub mod realtime;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/pages/:id/comments", get(list_comments).post(create_comment))
         .route("/comments/:id/resolve", patch(resolve_comment))
         .route("/comments/:id", delete(delete_comment))
+}
+
+/// Real-time events pushed to a page's connected comment listeners.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum CommentEvent<'a> {
+    Created { comment: &'a Comment },
+    Updated { comment: &'a Comment },
+    Deleted { id: Uuid },
 }
 
 #[derive(Serialize)]
@@ -165,7 +176,9 @@ async fn create_comment(
         .fetch_one(&state.db)
         .await?;
 
-    Ok(Json(row.into()))
+    let comment: Comment = row.into();
+    realtime::publish(&state.comments, perm.page_id, &CommentEvent::Created { comment: &comment });
+    Ok(Json(comment))
 }
 
 async fn list_comments(
@@ -223,7 +236,9 @@ async fn resolve_comment(
         .bind(id)
         .fetch_one(&state.db)
         .await?;
-    Ok(Json(row.into()))
+    let comment: Comment = row.into();
+    realtime::publish(&state.comments, comment.page_id, &CommentEvent::Updated { comment: &comment });
+    Ok(Json(comment))
 }
 
 async fn delete_comment(
@@ -231,7 +246,7 @@ async fn delete_comment(
     user: AuthenticatedUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    require_resolve_or_delete_access(&state, user.user_id, id).await?;
+    let page_id = require_resolve_or_delete_access(&state, user.user_id, id).await?;
 
     // FK ON DELETE CASCADE removes replies when a root is deleted.
     sqlx::query("delete from comments where id = $1")
@@ -239,5 +254,6 @@ async fn delete_comment(
         .execute(&state.db)
         .await?;
 
+    realtime::publish(&state.comments, page_id, &CommentEvent::Deleted { id });
     Ok(Json(serde_json::json!({ "message": "comment deleted" })))
 }

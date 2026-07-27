@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-07-18T09:32:58.720Z",
-  "projectRoot": "/home/haykal/Work/Code/me-doc",
+  "timestamp": "2026-07-27T12:56:58.005Z",
+  "projectRoot": "/home/haykal/Code/me-doc",
   "structure": {
     "hasPackageJson": false,
     "hasTsConfig": false,
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1784367178720
+  "scannedAt": 1785157018006
 }

@@ -84,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
         s3: Arc::new(s3),
         s3_presign: Arc::new(s3_presign),
         docs: collab::new_registry(),
+        comments: comments::realtime::new_hub(),
     };
 
     let app = Router::new()
@@ -102,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(export::router())
         .merge(versions::router())
         .merge(comments::router())
+        .merge(comments::realtime::router())
         .layer(GovernorLayer { config: standard_conf })
         .layer(CookieManagerLayer::new())
         .layer(cors)

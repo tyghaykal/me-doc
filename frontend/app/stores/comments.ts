@@ -30,10 +30,35 @@ export function commentAssigneeLabel(
   return name || c.assignee_email
 }
 
+/** Server-pushed comment events (see backend `comments::CommentEvent`). */
+export type CommentEvent =
+  | { type: 'created'; comment: Comment }
+  | { type: 'updated'; comment: Comment }
+  | { type: 'deleted'; id: string }
+
 export const useCommentsStore = defineStore('comments', () => {
   const api = useApi()
 
   const comments = ref<Comment[]>([])
+
+  // Upsert by id so an optimistic local insert and the same row echoed back
+  // over the realtime socket converge to one entry instead of duplicating.
+  function upsert(comment: Comment) {
+    const idx = comments.value.findIndex((c) => c.id === comment.id)
+    if (idx !== -1) comments.value[idx] = comment
+    else comments.value.push(comment)
+  }
+
+  function removeById(id: string) {
+    // Drop the row and any replies that hung off it (backend cascades).
+    comments.value = comments.value.filter((c) => c.id !== id && c.parent_id !== id)
+  }
+
+  /** Apply a realtime event from another (or the same) client. */
+  function applyEvent(ev: CommentEvent) {
+    if (ev.type === 'deleted') removeById(ev.id)
+    else upsert(ev.comment)
+  }
 
   async function fetchComments(pageId: string) {
     comments.value = await api<Comment[]>(`/pages/${pageId}/comments`)
@@ -53,7 +78,7 @@ export const useCommentsStore = defineStore('comments', () => {
         assignee_email: assigneeEmail || undefined,
       },
     })
-    comments.value.push(comment)
+    upsert(comment)
     return comment
   }
 
@@ -65,21 +90,19 @@ export const useCommentsStore = defineStore('comments', () => {
         body,
       },
     })
-    comments.value.push(comment)
+    upsert(comment)
     return comment
   }
 
   async function resolveComment(id: string) {
     const updated = await api<Comment>(`/comments/${id}/resolve`, { method: 'PATCH' })
-    const idx = comments.value.findIndex((c) => c.id === id)
-    if (idx !== -1) comments.value[idx] = updated
+    upsert(updated)
     return updated
   }
 
   async function deleteComment(id: string) {
     await api(`/comments/${id}`, { method: 'DELETE' })
-    // Drop the row and any replies that hung off it (backend cascades).
-    comments.value = comments.value.filter((c) => c.id !== id && c.parent_id !== id)
+    removeById(id)
   }
 
   function roots(): Comment[] {
@@ -96,6 +119,7 @@ export const useCommentsStore = defineStore('comments', () => {
 
   return {
     comments,
+    applyEvent,
     fetchComments,
     addComment,
     addReply,

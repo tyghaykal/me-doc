@@ -33,4 +33,5 @@ pub struct AppState {
     pub s3: Arc<aws_sdk_s3::Client>,
     pub s3_presign: Arc<aws_sdk_s3::Client>,
     pub docs: collab::DocRegistry,
+    pub comments: comments::realtime::CommentHub,
 }

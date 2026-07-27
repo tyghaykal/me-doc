@@ -56,6 +56,13 @@ const activePage = computed(
   () => pagesStore.pages.find((p) => p.id === pagesStore.activePageId) ?? sharedPage.value,
 )
 
+// Keep the comment thread live for whichever page is open, so create/reply/
+// resolve/delete from other collaborators appear without a manual refresh.
+useCommentStream(
+  () => activePage.value?.id,
+  () => linkToken.value,
+)
+
 // Who else is currently viewing/editing the open page, reported live by Editor's
 // awareness subscription. Reset on page switch so a stale list doesn't flash.
 const presentUsers = ref<
@@ -201,7 +208,7 @@ watch(
           not a separate shell column — so the page still feels like one canvas.
         -->
         <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
-          <div class="min-w-0 w-full max-w-3xl">
+          <div class="min-w-0 w-full" :class="activePage?.kind === 'diagram' ? 'max-w-5xl' : 'max-w-3xl'">
             <template v-if="!activePage">
               <PageHomeList
                 v-if="authStore.workspace"
@@ -209,9 +216,9 @@ watch(
               />
               <p v-else class="text-neutral-500 dark:text-neutral-400">Select a page from the sidebar.</p>
             </template>
-            <div v-else class="relative">
+            <div v-else class="relative" :class="activePage.kind === 'diagram' ? 'h-[calc(100vh-9rem)]' : ''">
               <div
-                v-if="editorLoading"
+                v-if="editorLoading && activePage.kind !== 'diagram'"
                 class="absolute inset-0 z-10 flex min-h-[40vh] flex-col items-center justify-center gap-3 bg-white/80 dark:bg-neutral-900/80"
               >
                 <div
@@ -220,7 +227,19 @@ watch(
                 />
                 <p class="text-sm text-neutral-500 dark:text-neutral-400">Loading document…</p>
               </div>
+              <DiagramPage
+                v-if="activePage.kind === 'diagram'"
+                :key="`${activePage.id}:${editorEpoch}`"
+                :page-id="activePage.id"
+                :workspace-id="activePage.workspace_id"
+                :title="activePage.title"
+                :icon="activePage.icon"
+                :link-token="linkToken"
+                :read-only="activePage.role === 'viewer'"
+                @presence-change="presentUsers = $event"
+              />
               <Editor
+                v-else
                 :key="`${activePage.id}:${editorEpoch}`"
                 :page-id="activePage.id"
                 :workspace-id="activePage.workspace_id"
@@ -236,7 +255,7 @@ watch(
           </div>
 
           <TableOfContents
-            v-if="activePage"
+            v-if="activePage && activePage.kind !== 'diagram'"
             :editor="editorInstance"
             :scroll-root="editorScrollRoot"
           />

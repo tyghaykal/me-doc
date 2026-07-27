@@ -28,6 +28,8 @@ pub struct Page {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub icon: Option<String>,
+    /// 'document' (rich-text) or 'diagram' (Mermaid). Drives editor selection.
+    pub kind: String,
     /// The requester's resolved sharing role ("viewer"/"editor") — only
     /// populated by `get_page`, which is the only handler that knows it
     /// (others gate on workspace membership, not the page-sharing grant).
@@ -50,6 +52,7 @@ type PageRow = (
     DateTime<Utc>,
     DateTime<Utc>,
     Option<String>,
+    String,
 );
 
 impl From<PageRow> for Page {
@@ -66,6 +69,7 @@ impl From<PageRow> for Page {
             created_at: r.8,
             updated_at: r.9,
             icon: r.10,
+            kind: r.11,
             role: None,
             has_children: None,
         }
@@ -98,7 +102,7 @@ fn decode_cursor(cursor: &str) -> Option<(i32, Uuid)> {
     Some((oi.parse().ok()?, id.parse().ok()?))
 }
 
-const PAGE_COLUMNS: &str = "id, workspace_id, parent_page_id, title, slug, order_index, archived_at, created_by, created_at, updated_at, icon";
+const PAGE_COLUMNS: &str = "id, workspace_id, parent_page_id, title, slug, order_index, archived_at, created_by, created_at, updated_at, icon, kind";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -107,6 +111,7 @@ pub fn router() -> Router<AppState> {
             get(list_pages).post(create_page),
         )
         .route("/workspaces/:workspace_id/pages/trash", get(list_trash))
+        .route("/workspaces/:workspace_id/diagrams", get(list_diagrams))
         .route("/pages/:id", get(get_page).patch(update_page).delete(delete_page))
         .route("/pages/:id/restore", patch(restore_page))
         .route("/pages/:id/duplicate", post(duplicate_page))
@@ -136,6 +141,8 @@ async fn page_workspace(db: &PgPool, id: Uuid) -> Result<Uuid, AuthError> {
 struct CreatePageRequest {
     title: Option<String>,
     parent_page_id: Option<Uuid>,
+    /// 'document' (default) or 'diagram'.
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -193,10 +200,15 @@ async fn create_page(
 
     let title = body.title.unwrap_or_else(|| "Untitled".to_string());
     let slug = slugify(&title);
+    // Only the two known kinds; anything else falls back to a document.
+    let kind = match body.kind.as_deref() {
+        Some("diagram") => "diagram",
+        _ => "document",
+    };
 
     let row: PageRow = sqlx::query_as(&format!(
-        "insert into pages (workspace_id, parent_page_id, title, slug, created_by)
-         values ($1, $2, $3, $4, $5)
+        "insert into pages (workspace_id, parent_page_id, title, slug, created_by, kind)
+         values ($1, $2, $3, $4, $5, $6)
          returning {PAGE_COLUMNS}"
     ))
     .bind(workspace_id)
@@ -204,10 +216,33 @@ async fn create_page(
     .bind(&title)
     .bind(&slug)
     .bind(user.user_id)
+    .bind(kind)
     .fetch_one(&state.db)
     .await?;
 
     Ok(Json(row.into()))
+}
+
+/// Flat list of the workspace's diagram pages — powers the "embed diagram"
+/// picker. Small, unpaginated (a workspace won't have thousands of diagrams).
+async fn list_diagrams(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Path(workspace_id): Path<Uuid>,
+) -> Result<Json<Vec<Page>>, AuthError> {
+    require_membership(&state.db, workspace_id, user.user_id).await?;
+
+    let rows: Vec<PageRow> = sqlx::query_as(&format!(
+        "select {PAGE_COLUMNS} from pages
+         where workspace_id = $1 and kind = 'diagram' and archived_at is null
+         order by updated_at desc
+         limit 200"
+    ))
+    .bind(workspace_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(Page::from).collect()))
 }
 
 async fn list_pages(
@@ -242,6 +277,7 @@ async fn list_pages(
         DateTime<Utc>,
         DateTime<Utc>,
         Option<String>,
+        String,
         bool,
     );
 
@@ -249,7 +285,7 @@ async fn list_pages(
         (None, None) => {
             sqlx::query_as(
                 "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
-                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon, p.kind,
                         exists(
                           select 1 from pages c
                           where c.parent_page_id = p.id and c.archived_at is null
@@ -269,7 +305,7 @@ async fn list_pages(
         (None, Some((oi, id))) => {
             sqlx::query_as(
                 "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
-                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon, p.kind,
                         exists(
                           select 1 from pages c
                           where c.parent_page_id = p.id and c.archived_at is null
@@ -292,7 +328,7 @@ async fn list_pages(
         (Some(parent_id), None) => {
             sqlx::query_as(
                 "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
-                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon, p.kind,
                         exists(
                           select 1 from pages c
                           where c.parent_page_id = p.id and c.archived_at is null
@@ -313,7 +349,7 @@ async fn list_pages(
         (Some(parent_id), Some((oi, id))) => {
             sqlx::query_as(
                 "select p.id, p.workspace_id, p.parent_page_id, p.title, p.slug, p.order_index,
-                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon,
+                        p.archived_at, p.created_by, p.created_at, p.updated_at, p.icon, p.kind,
                         exists(
                           select 1 from pages c
                           where c.parent_page_id = p.id and c.archived_at is null
@@ -340,9 +376,9 @@ async fn list_pages(
         .into_iter()
         .map(|r| {
             let mut p = Page::from((
-                r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10,
+                r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10, r.11,
             ));
-            p.has_children = Some(r.11);
+            p.has_children = Some(r.12);
             p
         })
         .collect();
@@ -432,19 +468,19 @@ async fn duplicate_page(
     let workspace_id = page_workspace(&state.db, id).await?;
     require_membership(&state.db, workspace_id, user.user_id).await?;
 
-    let source: Option<(Option<Uuid>, String)> =
-        sqlx::query_as("select parent_page_id, title from pages where id = $1")
+    let source: Option<(Option<Uuid>, String, String)> =
+        sqlx::query_as("select parent_page_id, title, kind from pages where id = $1")
             .bind(id)
             .fetch_optional(&state.db)
             .await?;
-    let (parent_page_id, title) = source.ok_or(AuthError::NotFound)?;
+    let (parent_page_id, title, kind) = source.ok_or(AuthError::NotFound)?;
 
     let new_title = format!("{title} (copy)");
     let slug = slugify(&new_title);
 
     let row: PageRow = sqlx::query_as(&format!(
-        "insert into pages (workspace_id, parent_page_id, title, slug, created_by)
-         values ($1, $2, $3, $4, $5)
+        "insert into pages (workspace_id, parent_page_id, title, slug, created_by, kind)
+         values ($1, $2, $3, $4, $5, $6)
          returning {PAGE_COLUMNS}"
     ))
     .bind(workspace_id)
@@ -452,6 +488,7 @@ async fn duplicate_page(
     .bind(&new_title)
     .bind(&slug)
     .bind(user.user_id)
+    .bind(&kind)
     .fetch_one(&state.db)
     .await?;
 
@@ -517,8 +554,13 @@ async fn put_page_content(
 
     // Keep plain_text (and its generated search_vector) in sync with every
     // save — search matches page content via that column, so a save that
-    // only wrote yjs_state would silently leave content unsearchable.
-    let plain_text = crate::export::yjs_to_markdown(&body);
+    // only wrote yjs_state would silently leave content unsearchable. Documents
+    // store a rich-text XML fragment; diagram pages store their Mermaid source
+    // in a `Y.Text` named "source" — fall back to that when the doc body is empty.
+    let mut plain_text = crate::export::yjs_to_markdown(&body);
+    if plain_text.trim().is_empty() {
+        plain_text = crate::export::yjs_named_text(&body, "source");
+    }
 
     sqlx::query(
         "insert into page_content (page_id, yjs_state, plain_text, updated_at)

@@ -2,6 +2,7 @@ import { Extension } from '@tiptap/core'
 import Suggestion from '@tiptap/suggestion'
 import { VueRenderer } from '@tiptap/vue-3'
 import SlashCommandList from './SlashCommandList.vue'
+import { DEFAULT_DIAGRAM_SOURCE } from '~/utils/diagram/templates'
 
 export interface SlashCommandItem {
   title: string
@@ -12,7 +13,8 @@ export interface SlashCommandItem {
   command: (props: { editor: any; range: any }) => void
 }
 
-function buildCommands(onInsertImage: () => void): SlashCommandItem[] {
+function buildCommands(opts: SlashCommandOptions): SlashCommandItem[] {
+  const { onInsertImage, onEmbedDiagram } = opts
   return [
     {
       title: 'Text',
@@ -144,6 +146,31 @@ function buildCommands(onInsertImage: () => void): SlashCommandItem[] {
       command: ({ editor, range }) =>
         editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
     },
+    {
+      title: 'Diagram',
+      description: 'Draw a Mermaid chart or diagram.',
+      group: 'Media',
+      icon: '◈',
+      keywords: 'diagram chart mermaid flowchart graph sequence',
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({ type: 'diagram', attrs: { source: DEFAULT_DIAGRAM_SOURCE } })
+          .run(),
+    },
+    {
+      title: 'Embed diagram',
+      description: 'Insert a live copy of an existing diagram.',
+      group: 'Media',
+      icon: '⧉',
+      keywords: 'embed diagram chart link reference',
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run()
+        onEmbedDiagram()
+      },
+    },
   ]
 }
 
@@ -175,6 +202,7 @@ function positionPopup(popup: HTMLElement, clientRect: (() => DOMRect | null) | 
 
 export interface SlashCommandOptions {
   onInsertImage: () => void
+  onEmbedDiagram: () => void
 }
 
 export const SlashCommand = Extension.create<SlashCommandOptions>({
@@ -183,11 +211,12 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
   addOptions() {
     return {
       onInsertImage: () => {},
+      onEmbedDiagram: () => {},
     }
   },
 
   addProseMirrorPlugins() {
-    const commands = buildCommands(this.options.onInsertImage)
+    const commands = buildCommands(this.options)
 
     return [
       Suggestion({
