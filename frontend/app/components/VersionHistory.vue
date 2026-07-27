@@ -140,7 +140,7 @@ watch(
       >
         <div class="flex shrink-0 items-start justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div>
-            <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Version history</h2>
+            <h2 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">Version history</h2>
             <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
               Snapshots from past editing sessions
             </p>
@@ -231,7 +231,7 @@ watch(
             <button
               type="button"
               :disabled="!!restoringId"
-              class="rounded bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+              class="rounded bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
               @click="confirmRestore"
             >
               {{ restoringId ? 'Restoring…' : 'Restore' }}

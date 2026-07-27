@@ -25,26 +25,49 @@ const features = [
 
 <template>
   <section class="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-      <div
-        v-for="f in features"
-        :key="f.title"
-        class="rounded-lg border border-neutral-200 p-6 dark:border-neutral-800"
-      >
+    <div class="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:gap-16">
+      <!-- Real-time collaboration leads — it's the product's core differentiator, not a
+           peer of the other three, so it gets its own weight instead of a fourth identical card. -->
+      <div class="lg:col-span-3">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="1.75"
+          stroke-width="1.5"
           stroke-linecap="round"
           stroke-linejoin="round"
-          class="h-6 w-6 text-neutral-900 dark:text-neutral-100"
+          class="h-9 w-9 text-teal-600 dark:text-teal-400"
         >
-          <path :d="f.path" />
+          <path :d="features[0].path" />
         </svg>
-        <h3 class="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">{{ f.title }}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{{ f.description }}</p>
+        <h3 class="mt-5 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+          {{ features[0].title }}
+        </h3>
+        <p class="mt-3 max-w-md text-base text-neutral-600 dark:text-neutral-400">
+          {{ features[0].description }}
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-6 border-t border-neutral-200 pt-8 lg:col-span-2 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0 dark:border-neutral-800">
+        <div v-for="f in features.slice(1)" :key="f.title" class="flex gap-3">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="mt-0.5 h-5 w-5 shrink-0 text-neutral-500 dark:text-neutral-400"
+          >
+            <path :d="f.path" />
+          </svg>
+          <div>
+            <h4 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ f.title }}</h4>
+            <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">{{ f.description }}</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>

@@ -54,7 +54,7 @@ async function submit() {
       <button
         type="submit"
         :disabled="loading"
-        class="mt-6 w-full rounded bg-neutral-900 px-4 py-2 font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+        class="mt-6 w-full rounded bg-teal-600 px-4 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
       >
         {{ loading ? 'Verifying…' : 'Verify' }}
       </button>

@@ -25,8 +25,10 @@ function select(id: string) {
       <li v-for="page in sortedShared" :key="page.id">
         <button
           type="button"
-          class="flex w-full cursor-pointer items-center gap-1 truncate rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          :class="pagesStore.activePageId === page.id ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100' : ''"
+          class="flex w-full cursor-pointer items-center gap-1 truncate rounded px-2 py-1 text-left"
+          :class="pagesStore.activePageId === page.id
+            ? 'bg-teal-50 font-medium text-teal-900 hover:bg-teal-100 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60'
+            : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'"
           @click="select(page.id)"
         >
           <span class="shrink-0">{{ page.icon || DEFAULT_PAGE_ICON }}</span>

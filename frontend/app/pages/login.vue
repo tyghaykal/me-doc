@@ -17,7 +17,7 @@ async function submit() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
-    await navigateTo({ path: '/login/otp', query: { email: email.value } })
+    await navigateTo({ path: '/login-otp', query: { email: email.value } })
   } catch (err: any) {
     error.value = err?.data?.message ?? err?.message ?? 'Login failed.'
   } finally {
@@ -59,14 +59,14 @@ async function submit() {
       <button
         type="submit"
         :disabled="loading"
-        class="mt-6 w-full rounded bg-neutral-900 px-4 py-2 font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+        class="mt-6 w-full rounded bg-teal-600 px-4 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
       >
         {{ loading ? 'Logging in…' : 'Log in' }}
       </button>
 
       <p class="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
         No account?
-        <NuxtLink to="/register" class="font-medium text-neutral-900 underline dark:text-neutral-100">Sign up</NuxtLink>
+        <NuxtLink to="/register" class="font-medium text-teal-700 underline dark:text-teal-400">Sign up</NuxtLink>
       </p>
     </form>
   </main>

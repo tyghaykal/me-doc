@@ -114,11 +114,28 @@ function close() {
 
 <template>
   <Teleport to="body">
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
     <div
       v-if="open"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 font-sans dark:bg-black/60"
       @click.self="close"
     >
+      <Transition
+        appear
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 scale-95 translate-y-2"
+        enter-to-class="opacity-100 scale-100 translate-y-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 scale-100 translate-y-0"
+        leave-to-class="opacity-0 scale-95 translate-y-2"
+      >
       <div
         role="dialog"
         aria-modal="true"
@@ -162,7 +179,7 @@ function close() {
             <button
               type="submit"
               :disabled="inviting"
-              class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+              class="rounded bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
             >
               {{ inviting ? '…' : 'Invite' }}
             </button>
@@ -251,7 +268,7 @@ function close() {
             <button
               type="button"
               :disabled="generating"
-              class="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+              class="rounded bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
               @click="generateLink"
             >
               {{ generating ? '…' : 'Generate link' }}
@@ -277,6 +294,8 @@ function close() {
           <p v-if="linkError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ linkError }}</p>
         </section>
       </div>
+      </Transition>
     </div>
+    </Transition>
   </Teleport>
 </template>

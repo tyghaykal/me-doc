@@ -164,7 +164,7 @@ async function onDropOn(e: DragEvent, target: PageNode) {
           />
           <span
             v-if="dropHint?.id === node.id && dropHint.zone"
-            class="pointer-events-none absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow dark:bg-neutral-100 dark:text-neutral-900"
+            class="pointer-events-none absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow dark:bg-sky-500"
           >
             {{ dropLabel(dropHint.zone) }}
           </span>

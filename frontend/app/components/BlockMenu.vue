@@ -331,7 +331,7 @@ async function submitComment() {
           <button
             type="button"
             :disabled="!commentBody.trim()"
-            class="rounded bg-neutral-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+            class="rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
             @click="submitComment"
           >
             Comment

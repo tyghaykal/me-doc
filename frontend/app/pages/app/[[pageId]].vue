@@ -208,7 +208,10 @@ watch(
           not a separate shell column — so the page still feels like one canvas.
         -->
         <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
-          <div class="min-w-0 w-full" :class="activePage?.kind === 'diagram' ? 'max-w-5xl' : 'max-w-3xl'">
+          <div
+            class="min-w-0 w-full"
+            :class="!activePage ? 'max-w-3xl' : activePage.kind === 'diagram' ? 'max-w-5xl' : 'max-w-prose'"
+          >
             <template v-if="!activePage">
               <PageHomeList
                 v-if="authStore.workspace"

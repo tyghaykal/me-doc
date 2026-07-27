@@ -362,15 +362,14 @@ async function loadMoreChildren(parent: PageNode) {
     <li v-for="node in nodes" :key="node.id">
       <div
         draggable="true"
-        class="group relative flex cursor-grab items-center gap-1 rounded px-2 py-1.5 active:cursor-grabbing hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        class="group relative flex cursor-grab items-center gap-1 rounded px-2 py-1.5 active:cursor-grabbing"
         :class="[
-          pagesStore.activePageId === node.id
-            ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
-            : '',
-          draggingId === node.id ? 'opacity-50' : '',
           dropHint?.id === node.id && dropHint.zone === 'into'
             ? 'bg-sky-50 ring-1 ring-inset ring-sky-400 dark:bg-sky-950/40 dark:ring-sky-500'
-            : '',
+            : pagesStore.activePageId === node.id
+              ? 'bg-teal-50 font-medium text-teal-900 hover:bg-teal-100 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60'
+              : 'hover:bg-neutral-100 dark:hover:bg-neutral-800',
+          draggingId === node.id ? 'opacity-50' : '',
         ]"
         :style="{ paddingLeft: `${depth * 12 + 8}px` }"
         @click="select(node)"

@@ -189,6 +189,14 @@ watch(
 </script>
 
 <template>
+  <Transition
+    enter-active-class="transition duration-200 ease-out"
+    enter-from-class="translate-x-full opacity-0"
+    enter-to-class="translate-x-0 opacity-100"
+    leave-active-class="transition duration-150 ease-in"
+    leave-from-class="translate-x-0 opacity-100"
+    leave-to-class="translate-x-full opacity-0"
+  >
   <aside
     v-if="open"
     class="fixed right-0 top-0 z-40 flex h-screen shrink-0 flex-col border-l border-neutral-200 bg-white font-sans dark:border-neutral-800 dark:bg-neutral-900"
@@ -207,7 +215,7 @@ watch(
     />
 
     <div class="flex shrink-0 items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-      <h2 class="text-sm font-bold text-neutral-900 dark:text-neutral-100">Comments</h2>
+      <h2 class="text-base font-bold text-neutral-900 dark:text-neutral-100">Comments</h2>
       <button
         type="button"
         aria-label="Close"
@@ -326,7 +334,7 @@ watch(
             <button
               type="submit"
               :disabled="replying[c.id] || !(replyDrafts[c.id] || '').trim()"
-              class="rounded bg-neutral-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+              class="rounded bg-teal-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-40 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
             >
               {{ replying[c.id] ? '…' : 'Reply' }}
             </button>
@@ -335,4 +343,5 @@ watch(
       </ul>
     </div>
   </aside>
+  </Transition>
 </template>
