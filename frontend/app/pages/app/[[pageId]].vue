@@ -6,7 +6,6 @@ definePageMeta({ middleware: ['auth'] })
 
 const authStore = useAuthStore()
 const pagesStore = usePagesStore()
-const workspacesStore = useWorkspacesStore()
 const route = useRoute()
 
 const shareOpen = ref(false)
@@ -78,6 +77,7 @@ watch(
 )
 
 const { record: recordRecent } = useRecents()
+useAppShellData()
 
 async function loadSharedPage(id: string) {
   sharedPage.value = null
@@ -132,33 +132,6 @@ watch(
     const currentId = Array.isArray(routeId) ? routeId[0] : routeId
     if ((id || null) !== (currentId || null)) {
       navigateTo(id ? `/app/${id}` : '/app')
-    }
-  },
-)
-
-const { prune: pruneRecents } = useRecents()
-
-onMounted(async () => {
-  if (!authStore.workspace) return
-  await pagesStore.fetchPages(authStore.workspace.id)
-  await Promise.all([pagesStore.fetchSharedPages(), pagesStore.fetchFavoritePages()])
-  pruneRecents(pagesStore.knownPageIds())
-  await workspacesStore.fetchAll()
-  const savedId = localStorage.getItem('activeWorkspaceId')
-  if (savedId && savedId !== authStore.workspace.id) {
-    const match = workspacesStore.list.find((ws) => ws.id === savedId)
-    if (match) workspacesStore.setActive(match)
-  }
-})
-
-watch(
-  () => authStore.workspace?.id,
-  async (id, old) => {
-    if (id && old && id !== old) {
-      pagesStore.activePageId = null
-      await pagesStore.fetchPages(id)
-      await Promise.all([pagesStore.fetchSharedPages(), pagesStore.fetchFavoritePages()])
-      pruneRecents(pagesStore.knownPageIds())
     }
   },
 )

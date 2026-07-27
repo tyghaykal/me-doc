@@ -114,11 +114,19 @@ async function onDropOn(e: DragEvent, target: PageNode) {
 
 <template>
   <div class="mx-auto w-full max-w-3xl">
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">Documents</h1>
-      <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-        Parent pages. Drag above/below a row to reorder (does not nest).
-      </p>
+    <div class="mb-6 flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">Documents</h1>
+        <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          Parent pages. Drag above/below a row to reorder (does not nest).
+        </p>
+      </div>
+      <NuxtLink
+        to="/changelog"
+        class="shrink-0 rounded-md border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-900"
+      >
+        Changelog
+      </NuxtLink>
     </div>
 
     <p

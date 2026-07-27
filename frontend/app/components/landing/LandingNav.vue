@@ -5,8 +5,8 @@ const authReady = useAuthReady()
 </script>
 
 <template>
-  <nav class="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
-    <span class="text-lg font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">me-doc</span>
+  <nav class="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
+    <NuxtLink to="/" class="text-lg font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">me-doc</NuxtLink>
 
     <div class="flex items-center gap-2">
       <button
