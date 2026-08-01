@@ -83,6 +83,20 @@ services:
       timeout: 5s
       retries: 10
 
+  # MarkItDown-backed doc-to-Markdown conversion for page import (docx/pdf/
+  # xlsx/epub/...). Internal-only — no published port, reached by the backend
+  # over the compose network the same way it reaches postgres/redis/minio.
+  converter:
+    build:
+      context: ./converter
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -106,6 +120,7 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@me-doc.local}
+      CONVERTER_URL: http://converter:8000
       BACKEND_PORT: "8080"
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
@@ -124,6 +139,8 @@ services:
       minio:
         condition: service_healthy
       mailpit:
+        condition: service_healthy
+      converter:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

@@ -40,7 +40,7 @@ function open() {
           Open ↗
         </button>
       </div>
-      <div class="h-[320px]">
+      <div class="h-[560px]">
         <DiagramCanvas :source="source" />
       </div>
     </div>

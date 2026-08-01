@@ -57,7 +57,7 @@ let titleTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleTitleSave() {
   clearTimeout(titleTimer)
   titleTimer = setTimeout(
-    () => pagesStore.updatePage(props.pageId, { title: titleDraft.value || 'Untitled' }),
+    () => pagesStore.updatePage(props.pageId, { title: titleDraft.value || 'Untitled' }, props.linkToken),
     800,
   )
 }
@@ -69,7 +69,7 @@ const EMOJI_CHOICES = ['📊', '📈', '📉', '🗂️', '🧭', '🔀', '🧩'
 function setIcon(icon: string | null) {
   iconDraft.value = icon ?? ''
   iconPickerOpen.value = false
-  pagesStore.updatePage(props.pageId, { icon })
+  pagesStore.updatePage(props.pageId, { icon }, props.linkToken)
 }
 </script>
 
@@ -115,7 +115,7 @@ function setIcon(icon: string | null) {
       :readonly="readOnly"
       class="mb-3 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
       @input="!readOnly && scheduleTitleSave()"
-      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' })"
+      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' }, linkToken)"
     />
 
     <div class="min-h-0 flex-1">

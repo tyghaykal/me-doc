@@ -8,11 +8,13 @@ defineProps<{
   view: View
   presence?: PresenceUser[]
   readonly?: boolean
+  fullscreen?: boolean
 }>()
 const emit = defineEmits<{
   'update:view': [View]
   insert: [DiagramTemplate]
   export: []
+  'toggle-fullscreen': []
 }>()
 
 const views: { id: View; label: string; icon: string }[] = [
@@ -98,6 +100,16 @@ function pick(t: DiagramTemplate) {
       @click="emit('export')"
     >
       ↓ SVG
+    </button>
+
+    <!-- Fullscreen -->
+    <button
+      type="button"
+      class="rounded-lg px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      :title="fullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+      @click="emit('toggle-fullscreen')"
+    >
+      {{ fullscreen ? '⤡' : '⤢' }}
     </button>
   </div>
 </template>

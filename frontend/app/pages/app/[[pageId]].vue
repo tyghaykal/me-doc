@@ -55,11 +55,23 @@ const activePage = computed(
   () => pagesStore.pages.find((p) => p.id === pagesStore.activePageId) ?? sharedPage.value,
 )
 
+const { record: recordRecent, rename: renameRecent } = useRecents()
+
 // Keep the comment thread live for whichever page is open, so create/reply/
 // resolve/delete from other collaborators appear without a manual refresh.
+// Also carries title/icon rename events — pagesStore.patchPageMeta covers a
+// normal member's page list, but two more local caches aren't part of that
+// store and need the same patch by hand: an anonymous link-guest's
+// `sharedPage`, and the "Recents" sidebar list (its own localStorage-backed
+// snapshot, otherwise stuck showing whatever title was current when the page
+// was last visited).
 useCommentStream(
   () => activePage.value?.id,
   () => linkToken.value,
+  (patch) => {
+    if (sharedPage.value) Object.assign(sharedPage.value, patch)
+    if (activePage.value) renameRecent(activePage.value.id, patch)
+  },
 )
 
 // Who else is currently viewing/editing the open page, reported live by Editor's
@@ -76,7 +88,6 @@ watch(
   },
 )
 
-const { record: recordRecent } = useRecents()
 useAppShellData()
 
 async function loadSharedPage(id: string) {
@@ -183,7 +194,7 @@ watch(
         <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
           <div
             class="min-w-0 w-full"
-            :class="!activePage ? 'max-w-3xl' : activePage.kind === 'diagram' ? 'max-w-5xl' : 'max-w-prose'"
+            :class="!activePage ? 'max-w-3xl' : activePage.kind === 'diagram' ? 'max-w-5xl' : 'max-w-3xl'"
           >
             <template v-if="!activePage">
               <PageHomeList

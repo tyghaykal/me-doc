@@ -395,17 +395,19 @@ async fn list_pages(
 
 async fn update_page(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AuthError> {
-    let workspace_id: Option<(Uuid,)> =
-        sqlx::query_as("select workspace_id from pages where id = $1")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await?;
-    let (workspace_id,) = workspace_id.ok_or(AuthError::NotFound)?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
+    // Same gate as `put_page_content`: a page-level or link grant can make you
+    // an editor without workspace membership, and rename/move/re-icon should
+    // work for that editor exactly like editing the body does. The previous
+    // `require_membership` check rejected every non-member editor outright —
+    // including anonymous public-link guests — so their title edits silently
+    // failed to save (and so never had anything to broadcast).
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
+    let id = perm.page_id;
 
     let (set_parent, parent_value) = match body.parent_page_id {
         Some(v) => (true, v),
@@ -436,7 +438,20 @@ async fn update_page(
     .fetch_one(&state.db)
     .await?;
 
-    Ok(Json(row.into()))
+    let page: Page = row.into();
+    // Title/icon live in Postgres, not the Yjs doc, so they never ride the
+    // collab WebSocket's own sync — without this, another viewer only sees a
+    // rename after their next full page load. Every viewer already holds the
+    // comments-events socket open for this page (`useCommentStream`, mounted
+    // unconditionally per open page), so reuse that channel rather than
+    // standing up a new one.
+    crate::comments::realtime::publish(
+        &state.comments,
+        id,
+        &serde_json::json!({ "type": "page", "title": page.title, "icon": page.icon }),
+    );
+
+    Ok(Json(page))
 }
 
 async fn delete_page(

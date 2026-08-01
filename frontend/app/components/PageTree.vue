@@ -54,6 +54,11 @@ const expandedExplicit = useState<Set<string>>('pageTree-expanded', () => new Se
 
 function select(node: PageNode) {
   pagesStore.activePageId = node.id
+  // PageTree is also rendered from pages that aren't `/app/[[pageId]]`
+  // (e.g. the changelog) — those hosts have no route<->activePageId watcher,
+  // so setting the store alone silently does nothing there. Navigate
+  // directly instead of relying on a side effect that only exists on one host.
+  navigateTo(`/app/${node.id}`)
 }
 
 // Keep the open page visible in the tree: explicitly expand its ancestor chain
@@ -288,8 +293,13 @@ function addDiagram() {
   pagesStore.createPage(props.workspaceId, { title: 'Untitled diagram', kind: 'diagram' })
 }
 
+const api = useApi()
+
 const importInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importError = ref<string | null>(null)
 function triggerImport() {
+  importError.value = null
   importInput.value?.click()
 }
 
@@ -297,22 +307,47 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
 
+// Anything MarkItDown can turn into Markdown — .txt/.md stay local (no
+// network round-trip), everything else goes through the converter service.
+const CONVERTIBLE_EXTENSIONS = /\.(docx|doc|pdf|xlsx|xls|pptx|ppt|epub|html?|csv)$/i
+
 async function onImportFile(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
 
-  const text = await file.text()
-  const isMarkdown = file.name.toLowerCase().endsWith('.md')
-  const html = isMarkdown
-    ? markdownToHtml(text)
-    : text
-        .split(/\n{2,}/)
-        .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
-        .join('')
+  const name = file.name.toLowerCase()
+  let html: string
 
-  const title = file.name.replace(/\.(md|txt)$/i, '')
+  if (name.endsWith('.md') || name.endsWith('.txt')) {
+    const text = await file.text()
+    html = name.endsWith('.md')
+      ? markdownToHtml(text)
+      : text
+          .split(/\n{2,}/)
+          .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+          .join('')
+  } else if (CONVERTIBLE_EXTENSIONS.test(name)) {
+    importing.value = true
+    importError.value = null
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { markdown } = await api<{ markdown: string }>('/pages/import', { method: 'POST', body: form })
+      html = markdownToHtml(markdown)
+    } catch (err: any) {
+      importError.value = err?.data?.message ?? err?.message ?? 'Import failed.'
+      return
+    } finally {
+      importing.value = false
+    }
+  } else {
+    importError.value = 'Unsupported file type.'
+    return
+  }
+
+  const title = file.name.replace(/\.[^.]+$/, '')
   const page = await pagesStore.createPage(props.workspaceId, { title })
   pagesStore.setPendingImport(page.id, html)
 }
@@ -350,13 +385,23 @@ async function loadMoreChildren(parent: PageNode) {
       </button>
       <button
         type="button"
-        title="Import a .txt or .md file"
-        class="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        :disabled="importing"
+        title="Import a document (.txt, .md, .docx, .pdf, .xlsx, .pptx, .epub, ...)"
+        class="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         @click="triggerImport"
       >
-        Import
+        {{ importing ? 'Importing…' : 'Import' }}
       </button>
-      <input ref="importInput" type="file" accept=".md,.txt" class="hidden" @change="onImportFile" />
+      <input
+        ref="importInput"
+        type="file"
+        accept=".md,.txt,.docx,.doc,.pdf,.xlsx,.xls,.pptx,.ppt,.epub,.html,.htm,.csv"
+        class="hidden"
+        @change="onImportFile"
+      />
+    </li>
+    <li v-if="depth === 0 && importError" class="mb-1 px-2 text-xs text-red-600 dark:text-red-400">
+      {{ importError }}
     </li>
 
     <li v-for="node in nodes" :key="node.id">

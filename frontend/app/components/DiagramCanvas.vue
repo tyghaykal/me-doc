@@ -10,6 +10,7 @@ const props = defineProps<{
 const { isDark } = useTheme()
 
 const host = ref<HTMLElement | null>(null)
+const viewport = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 const rendering = ref(false)
 
@@ -20,6 +21,10 @@ const ty = ref(0)
 
 let renderTimer: ReturnType<typeof setTimeout> | undefined
 let renderToken = 0
+// Auto-fit only the first time a diagram appears (mount, or the moment a
+// blank source gets its first content) — refitting on every keystroke would
+// fight a user who's mid pan/zoom while editing.
+let hasFitted = false
 
 async function render() {
   const token = ++renderToken
@@ -34,6 +39,10 @@ async function render() {
   }
   error.value = null
   if (host.value) host.value.innerHTML = svg ?? ''
+  if (!hasFitted) {
+    hasFitted = true
+    fitToView()
+  }
 }
 
 function scheduleRender() {
@@ -49,6 +58,27 @@ function zoomBy(factor: number) {
 }
 function resetView() {
   scale.value = 1
+  tx.value = 0
+  ty.value = 0
+}
+
+/** Scales so the whole diagram fits the visible canvas, then re-centers it. */
+function fitToView() {
+  const svg = host.value?.querySelector('svg')
+  if (!svg || !viewport.value) return
+  const rect = svg.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  // Un-scale the currently-rendered size by our own transform to get the
+  // diagram's natural size — avoids depending on the SVG's viewBox/width
+  // attributes, which mermaid doesn't always set consistently.
+  const naturalW = rect.width / scale.value
+  const naturalH = rect.height / scale.value
+  const PADDING = 32
+  const fit = Math.min(
+    (viewport.value.clientWidth - PADDING * 2) / naturalW,
+    (viewport.value.clientHeight - PADDING * 2) / naturalH,
+  )
+  scale.value = Math.min(4, Math.max(0.2, fit))
   tx.value = 0
   ty.value = 0
 }
@@ -76,7 +106,7 @@ function onPointerUp() {
   panning = false
 }
 
-defineExpose({ resetView, zoomBy })
+defineExpose({ resetView, fitToView, zoomBy })
 </script>
 
 <template>
@@ -98,8 +128,8 @@ defineExpose({ resetView, zoomBy })
       <button
         type="button"
         class="border-t border-neutral-200 px-2.5 py-1.5 text-[11px] text-neutral-600 hover:bg-neutral-100 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        title="Reset view"
-        @click="resetView"
+        title="Fit to view"
+        @click="fitToView"
       >Fit</button>
     </div>
 
@@ -112,6 +142,7 @@ defineExpose({ resetView, zoomBy })
     </div>
 
     <div
+      ref="viewport"
       class="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
       @wheel="onWheel"
       @pointerdown="onPointerDown"

@@ -85,6 +85,15 @@ export const usePagesStore = defineStore('pages', () => {
     sharedPages.value = sharedPages.value.filter((p) => p.id !== pageId)
   }
 
+  /** Applies a title/icon change pushed by another viewer (see useCommentStream's
+   * "page" event) to whichever locally-cached lists already hold this page. */
+  function patchPageMeta(pageId: string, patch: { title?: string; icon?: string | null }) {
+    for (const list of [pages.value, sharedPages.value, favoritePages.value]) {
+      const p = list.find((p) => p.id === pageId)
+      if (p) Object.assign(p, patch)
+    }
+  }
+
   const pageTree = computed<PageNode[]>(() => {
     const nodes = new Map<string, PageNode>()
     for (const p of pages.value) {
@@ -262,6 +271,7 @@ export const usePagesStore = defineStore('pages', () => {
   async function updatePage(
     pageId: string,
     changes: { title?: string; parentPageId?: string | null; orderIndex?: number; icon?: string | null },
+    linkToken?: string | null,
   ) {
     const body: Record<string, unknown> = {}
     if (changes.title !== undefined) body.title = changes.title
@@ -269,7 +279,14 @@ export const usePagesStore = defineStore('pages', () => {
     if (changes.orderIndex !== undefined) body.order_index = changes.orderIndex
     if (changes.icon !== undefined) body.icon = changes.icon
 
-    const page = await api<Page>(`/pages/${pageId}`, { method: 'PATCH', body })
+    // A public-link guest with editor access has no bearer token — same
+    // `?link=` fallback as the content PUT (see DiagramPage/Editor `save()`),
+    // otherwise the server has no principal to resolve their role from.
+    const page = await api<Page>(`/pages/${pageId}`, {
+      method: 'PATCH',
+      body,
+      query: linkToken ? { link: linkToken } : undefined,
+    })
     // Patch local cache immediately so tree reflects parent/order without
     // waiting for a full roots re-fetch (which would drop loaded children).
     const idx = pages.value.findIndex((p) => p.id === pageId)
@@ -379,5 +396,6 @@ export const usePagesStore = defineStore('pages', () => {
     setPendingImport,
     takePendingImport,
     knownPageIds,
+    patchPageMeta,
   }
 })

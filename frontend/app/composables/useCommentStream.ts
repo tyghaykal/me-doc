@@ -1,19 +1,35 @@
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { useCommentsStore, type CommentEvent } from '~/stores/comments'
 
+/** Pushed by `pages::update_page` (backend) whenever title/icon change. */
+interface PageMetaEvent {
+  type: 'page'
+  title: string
+  icon: string | null
+}
+
 /**
  * Keeps the comments store live for the open page: subscribes to
  * `/ws/comments/:id` and applies every create/reply/resolve/delete pushed by
  * the backend, so a user always sees the current comment thread without
  * polling. Re-seeds via `fetchComments` on each (re)connect to close the gap
  * between the last fetch and the socket opening.
+ *
+ * This socket is already open for every viewer of a page regardless of
+ * whether the comments sidebar is open, so it doubles as the transport for
+ * title/icon rename events — those live in Postgres, not the Yjs doc, so they
+ * don't otherwise ride the collab WebSocket's own realtime sync. `onPageMeta`
+ * lets the caller patch state the pages store doesn't hold itself (e.g. an
+ * anonymous link-guest's standalone `sharedPage`, not part of `pages.value`).
  */
 export function useCommentStream(
   pageId: MaybeRefOrGetter<string | null | undefined>,
   linkToken?: MaybeRefOrGetter<string | null | undefined>,
+  onPageMeta?: (patch: { title: string; icon: string | null }) => void,
 ) {
   const auth = useAuthStore()
   const store = useCommentsStore()
+  const pagesStore = usePagesStore()
   const wsBase = useApiBase().replace(/^http/, 'ws')
 
   let ws: WebSocket | null = null
@@ -52,7 +68,13 @@ export function useCommentStream(
     }
     ws.onmessage = (e) => {
       try {
-        store.applyEvent(JSON.parse(e.data) as CommentEvent)
+        const data = JSON.parse(e.data) as CommentEvent | PageMetaEvent
+        if (data.type === 'page') {
+          pagesStore.patchPageMeta(id, { title: data.title, icon: data.icon })
+          onPageMeta?.({ title: data.title, icon: data.icon })
+        } else {
+          store.applyEvent(data)
+        }
       } catch {
         // Ignore malformed frames.
       }

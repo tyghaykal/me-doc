@@ -82,14 +82,26 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> Result<Response, AuthError> {
     // Browsers can't set custom headers on the WS handshake, so the access token
-    // arrives as a query param. Reject the upgrade if it's missing/invalid.
-    let token = q.token.ok_or(AuthError::InvalidToken)?;
-    let claims = jwt::verify_access_token(&state.config.jwt_access_secret, &token)?;
+    // arrives as a query param instead of Authorization — and a genuinely
+    // anonymous guest (public link, never logged in) sends no token at all.
+    // Same precedence as the REST `PagePermission` extractor: verify a bearer
+    // token if present, otherwise fall back to the `?link=` grant. Without
+    // this fallback, an anonymous editor-link guest could never open this
+    // socket at all — their edits would only ever reach the DB through the
+    // periodic REST content PUT, which this room's own flusher/final-persist
+    // would then silently clobber since it never saw those changes.
+    let user_id = match q.token.as_deref() {
+        Some(token) => Some(jwt::verify_access_token(&state.config.jwt_access_secret, token)?.sub),
+        None => None,
+    };
+    if user_id.is_none() && q.link.is_none() {
+        return Err(AuthError::InvalidToken);
+    }
 
     // Same resolution as the REST endpoints (workspace membership, a direct
     // page/workspace grant, or a `?link=` token) — any resolved role can join
     // the room, but only Editor may actually mutate the doc (enforced below).
-    let role = sharing::resolve_role(&state.db, page_id, Some(claims.sub), q.link.as_deref()).await?;
+    let role = sharing::resolve_role(&state.db, page_id, user_id, q.link.as_deref()).await?;
 
     let room = join_room(&state, page_id).await?;
 

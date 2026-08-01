@@ -6,6 +6,8 @@ use axum::{
     Router,
 };
 use serde::Deserialize;
+use sqlx::PgPool;
+use uuid::Uuid;
 use yrs::updates::decoder::Decode;
 use yrs::{Any, Doc, GetString, Out, ReadTxn, Text, Transact, Update, Xml, XmlElementRef, XmlFragment, XmlOut, XmlTextRef};
 
@@ -42,8 +44,8 @@ async fn export_page(
         )));
     }
 
-    let row: Option<(String, Option<Vec<u8>>)> = sqlx::query_as(
-        "select p.slug, pc.yjs_state
+    let row: Option<(String, Uuid, Option<Vec<u8>>)> = sqlx::query_as(
+        "select p.slug, p.workspace_id, pc.yjs_state
          from pages p left join page_content pc on pc.page_id = p.id
          where p.id = $1",
     )
@@ -51,27 +53,35 @@ async fn export_page(
     .fetch_optional(&state.db)
     .await?;
 
-    let (slug, yjs_state) = row.ok_or(AuthError::NotFound)?;
+    let (slug, workspace_id, yjs_state) = row.ok_or(AuthError::NotFound)?;
 
     let markdown = yjs_to_markdown(&yjs_state.unwrap_or_default());
+    // Embeds are placeholder links coming out of the Yjs walk (it has no DB
+    // access) — resolve each to the target diagram page's actual Mermaid
+    // source now that we do, so it flows through the same
+    // ```mermaid``` -> Block::Diagram -> (image for docx/pdf) path as an
+    // inline diagram.
+    let markdown = resolve_diagram_embeds(&state.db, workspace_id, &markdown).await;
 
-    // DOCX/PDF share one parse + image fetch so remote assets are pulled once.
+    // DOCX/PDF share one parse + image/diagram fetch so remote assets are pulled once.
     let (content_type, ext, bytes): (&str, &str, Vec<u8>) = match format {
         "docx" | "pdf" => {
             let parsed = blocks::parse_markdown(&markdown);
             let urls = blocks::collect_image_urls(&parsed);
             let images = blocks::fetch_images(&urls).await;
+            let diagram_sources = blocks::collect_diagram_sources(&parsed);
+            let diagrams = blocks::fetch_diagrams(&diagram_sources).await;
             if format == "docx" {
                 (
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     "docx",
-                    docx::blocks_to_docx(&parsed, &images).map_err(AuthError::Internal)?,
+                    docx::blocks_to_docx(&parsed, &images, &diagrams).map_err(AuthError::Internal)?,
                 )
             } else {
                 (
                     "application/pdf",
                     "pdf",
-                    pdf::blocks_to_pdf(&parsed, &images).map_err(AuthError::Internal)?,
+                    pdf::blocks_to_pdf(&parsed, &images, &diagrams).map_err(AuthError::Internal)?,
                 )
             }
         }
@@ -92,6 +102,66 @@ async fn export_page(
         ],
         bytes,
     ))
+}
+
+/// Scans `markdown` for the `[Embedded diagram](/app/<id>)` placeholders
+/// `render_element_block` emits for `diagramEmbed` nodes and swaps each for a
+/// ` ```mermaid ` fence holding that page's actual source — scoped to the
+/// same workspace as the exported page so an embed can't be used to exfiltrate
+/// another workspace's diagram by id.
+async fn resolve_diagram_embeds(db: &PgPool, workspace_id: Uuid, markdown: &str) -> String {
+    const PREFIX: &str = "[Embedded diagram](/app/";
+    if !markdown.contains(PREFIX) {
+        return markdown.to_string();
+    }
+
+    let mut out = String::with_capacity(markdown.len());
+    let mut rest = markdown;
+    while let Some(start) = rest.find(PREFIX) {
+        out.push_str(&rest[..start]);
+        let after_prefix = &rest[start + PREFIX.len()..];
+        let Some(end) = after_prefix.find(')') else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let id_str = &after_prefix[..end];
+        let source = match Uuid::parse_str(id_str) {
+            Ok(id) => fetch_diagram_source(db, id, workspace_id).await,
+            Err(_) => None,
+        };
+        match source {
+            Some(src) => {
+                out.push_str("```mermaid\n");
+                out.push_str(src.trim_end_matches('\n'));
+                out.push_str("\n```");
+            }
+            None => out.push_str("*Embedded diagram unavailable*"),
+        }
+        rest = &after_prefix[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+async fn fetch_diagram_source(db: &PgPool, page_id: Uuid, workspace_id: Uuid) -> Option<String> {
+    let row: Option<(Option<Vec<u8>>,)> = sqlx::query_as(
+        "select pc.yjs_state
+         from pages p join page_content pc on pc.page_id = p.id
+         where p.id = $1 and p.workspace_id = $2 and p.kind = 'diagram' and p.archived_at is null",
+    )
+    .bind(page_id)
+    .bind(workspace_id)
+    .fetch_optional(db)
+    .await
+    .ok()?;
+
+    let source = yjs_named_text(&row?.0?, "source");
+    if source.trim().is_empty() {
+        None
+    } else {
+        Some(source)
+    }
 }
 
 /// Decode a Yjs v1 update into a `Doc` and serialize its "default" XML fragment
@@ -168,13 +238,18 @@ fn render_element_block<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut Strin
             out.push_str("\n\n");
         }
         "bulletList" => {
-            render_list(el, txn, out, None);
+            render_list(el, txn, out, ListKind::Bullet);
             out.push('\n');
         }
         "orderedList" => {
-            render_list(el, txn, out, Some(1));
+            render_list(el, txn, out, ListKind::Ordered(1));
             out.push('\n');
         }
+        "taskList" => {
+            render_list(el, txn, out, ListKind::Task);
+            out.push('\n');
+        }
+        "table" => render_table(el, txn, out),
         "codeBlock" => {
             let lang = attr_str(el, txn, "language").unwrap_or_default();
             let mut code = String::new();
@@ -228,18 +303,31 @@ fn render_element_block<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut Strin
     }
 }
 
-fn render_list<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut String, ordered: Option<usize>) {
-    let mut index = ordered.unwrap_or(0);
+enum ListKind {
+    Bullet,
+    Ordered(usize),
+    Task,
+}
+
+fn render_list<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut String, kind: ListKind) {
+    let mut index = match kind {
+        ListKind::Ordered(n) => n,
+        _ => 0,
+    };
     for item in el.children(txn) {
         let XmlOut::Element(li) = item else { continue };
 
-        let marker = match ordered {
-            Some(_) => {
+        let marker = match kind {
+            ListKind::Ordered(_) => {
                 let m = format!("{index}. ");
                 index += 1;
                 m
             }
-            None => "- ".to_string(),
+            ListKind::Bullet => "- ".to_string(),
+            ListKind::Task => {
+                let checked = matches!(li.get_attribute(txn, "checked"), Some(Out::Any(Any::Bool(true))));
+                if checked { "- [x] ".to_string() } else { "- [ ] ".to_string() }
+            }
         };
 
         let mut item_buf = String::new();
@@ -268,6 +356,53 @@ fn render_list<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut String, ordere
     }
 }
 
+/// Renders a `table` node as a GFM pipe table. Tiptap's table model always
+/// starts with a header row (`tableHeader` cells), so the separator row goes
+/// right after the first row unconditionally. Multi-paragraph cell content is
+/// flattened onto one line — GFM table cells can't span lines.
+fn render_table<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut String) {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for row in el.children(txn) {
+        let XmlOut::Element(row_el) = row else { continue };
+        if row_el.tag().as_ref() != "tableRow" {
+            continue;
+        }
+        let mut cells = Vec::new();
+        for cell in row_el.children(txn) {
+            let XmlOut::Element(cell_el) = cell else { continue };
+            let mut text = String::new();
+            for block in cell_el.children(txn) {
+                render_block(&block, txn, &mut text);
+            }
+            cells.push(text.trim().replace('\n', " ").replace('|', "\\|"));
+        }
+        rows.push(cells);
+    }
+
+    let col_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    if rows.is_empty() || col_count == 0 {
+        return;
+    }
+
+    for (i, cells) in rows.iter().enumerate() {
+        out.push('|');
+        for c in 0..col_count {
+            out.push(' ');
+            out.push_str(cells.get(c).map(String::as_str).unwrap_or(""));
+            out.push_str(" |");
+        }
+        out.push('\n');
+        if i == 0 {
+            out.push('|');
+            for _ in 0..col_count {
+                out.push_str(" --- |");
+            }
+            out.push('\n');
+        }
+    }
+    out.push('\n');
+}
+
 fn render_inline_children<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut String) {
     for child in el.children(txn) {
         match child {
@@ -288,7 +423,14 @@ fn render_inline_children<T: ReadTxn>(el: &XmlElementRef, txn: &T, out: &mut Str
 
 /// Render an XmlText run, wrapping each uniformly-formatted chunk in Markdown
 /// marks. y-prosemirror stores ProseMirror marks as Yjs text formatting attributes
-/// keyed by mark name (`bold`, `italic`, `code`, `strike`).
+/// keyed by mark name (`bold`, `italic`, `code`, `strike`, `highlight`, `textStyle`).
+///
+/// `highlight`/`textStyle` (the Color extension's mark) have no standard GFM
+/// syntax, so they ride as literal inline HTML (`<mark style="background:...">`,
+/// `<span style="color:...">`) — `blocks::parse_markdown` recognizes exactly
+/// these two tag shapes on the way back in. They wrap outermost so
+/// `**`/`*`/`` ` `` inside still parses normally (CommonMark only treats the
+/// tag itself as raw HTML, not its contents).
 fn render_text<T: ReadTxn>(t: &XmlTextRef, txn: &T, out: &mut String) {
     for diff in t.diff(txn, |change| change) {
         let Out::Any(Any::String(s)) = &diff.insert else {
@@ -309,8 +451,33 @@ fn render_text<T: ReadTxn>(t: &XmlTextRef, txn: &T, out: &mut String) {
             if attrs.contains_key("strike") {
                 text = format!("~~{text}~~");
             }
+            if attrs.contains_key("highlight") {
+                // Highlight's `color` attr can be unset (default swatch) even
+                // when the mark is present — fall back to a representative
+                // yellow so highlighted text is never silently dropped.
+                let color = mark_color(attrs, "highlight").unwrap_or_else(|| "#fef08a".to_string());
+                text = format!("<mark style=\"background:{color}\">{text}</mark>");
+            }
+            if let Some(color) = mark_color(attrs, "textStyle") {
+                text = format!("<span style=\"color:{color}\">{text}</span>");
+            }
         }
         out.push_str(&text);
+    }
+}
+
+/// Reads a mark's `color` attribute (Yjs stores mark attrs as an `Any::Map`)
+/// out of a text diff's attribute set. A mark applied via its default swatch
+/// (e.g. plain `<mark>` from a Markdown paste, no explicit color picked) still
+/// has a `color` key but with an empty string, not an absent one — treat that
+/// the same as "unset" rather than emitting an empty `background:` value.
+fn mark_color(attrs: &std::collections::HashMap<std::sync::Arc<str>, Any>, mark: &str) -> Option<String> {
+    match attrs.get(mark)? {
+        Any::Map(m) => match m.get("color")? {
+            Any::String(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

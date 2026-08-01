@@ -60,13 +60,20 @@ async fn ws_handler(
     Query(q): Query<TokenQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, AuthError> {
-    // Token rides the query string (browsers can't set WS handshake headers).
-    let token = q.token.ok_or(AuthError::InvalidToken)?;
-    let claims = jwt::verify_access_token(&state.config.jwt_access_secret, &token)?;
+    // Token rides the query string (browsers can't set WS handshake headers) —
+    // an anonymous public-link guest sends none at all, so fall back to the
+    // `?link=` grant exactly like the REST `PagePermission` extractor does.
+    let user_id = match q.token.as_deref() {
+        Some(token) => Some(jwt::verify_access_token(&state.config.jwt_access_secret, token)?.sub),
+        None => None,
+    };
+    if user_id.is_none() && q.link.is_none() {
+        return Err(AuthError::InvalidToken);
+    }
 
     // Any resolved role (viewer or editor) may read comments — same gate as the
     // REST `list_comments`. Reject the upgrade if there's no access at all.
-    sharing::resolve_role(&state.db, page_id, Some(claims.sub), q.link.as_deref()).await?;
+    sharing::resolve_role(&state.db, page_id, user_id, q.link.as_deref()).await?;
 
     let tx = state
         .comments

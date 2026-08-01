@@ -6,6 +6,7 @@ pub mod auth;
 pub mod collab;
 pub mod comments;
 pub mod config;
+pub mod convert;
 pub mod db;
 pub mod email;
 pub mod export;

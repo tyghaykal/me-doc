@@ -22,6 +22,7 @@ pub struct Config {
     pub jwt_refresh_ttl_seconds: i64,
     pub otp_ttl_seconds: i64,
     pub frontend_origin: String,
+    pub converter_url: String,
 }
 
 impl Config {
@@ -57,6 +58,8 @@ impl Config {
                 .parse()?,
             frontend_origin: env::var("FRONTEND_ORIGIN")
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
+            converter_url: env::var("CONVERTER_URL")
+                .unwrap_or_else(|_| "http://converter:8000".into()),
         })
     }
 }

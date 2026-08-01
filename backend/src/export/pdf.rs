@@ -15,13 +15,13 @@ use std::io::Cursor;
 use genpdf::error::Error as PdfError;
 use genpdf::fonts::{FontData, FontFamily};
 use genpdf::render::Area;
-use genpdf::style::Style;
+use genpdf::style::{Color, Style};
 use genpdf::{
     elements, Alignment, Context, Document, Element, Margins, Mm, RenderResult, Scale, Size,
     SimplePageDecorator,
 };
 
-use super::blocks::{Block, Run as IRun};
+use super::blocks::{Block, Run as IRun, TableRow as BlockTableRow};
 
 const FONT_CANDIDATES: &[(&str, &str)] = &[
     ("/usr/share/fonts/truetype/liberation", "LiberationSans"),
@@ -74,7 +74,11 @@ const GAP_CODE: f64 = 0.75;
 const GAP_LIST_ITEM: f64 = 0.35;
 const GAP_IMAGE: f64 = 0.75;
 
-pub fn blocks_to_pdf(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+pub fn blocks_to_pdf(
+    blocks: &[Block],
+    images: &HashMap<String, Vec<u8>>,
+    diagrams: &HashMap<String, Vec<u8>>,
+) -> anyhow::Result<Vec<u8>> {
     let mut doc = Document::new(load_font()?);
     doc.set_font_size(BODY_PT);
     doc.set_line_spacing(LINE_SPACING);
@@ -126,31 +130,39 @@ pub fn blocks_to_pdf(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> any
                 doc.push(elements::Break::new(GAP_QUOTE));
             }
             Block::Code(text) => {
-                // genpdf is single-family; code uses smaller size + indent like
-                // the editor's padded pre block.
-                if text.is_empty() {
-                    let mut p = elements::Paragraph::default();
-                    p.push_styled("    ", Style::new().with_font_size(CODE_PT));
-                    doc.push(p);
-                } else {
-                    for line in text.lines() {
-                        let mut p = elements::Paragraph::default();
-                        let rendered = if line.is_empty() {
-                            "    ".to_string()
-                        } else {
-                            format!("    {line}")
-                        };
-                        p.push_styled(rendered, Style::new().with_font_size(CODE_PT));
-                        doc.push(p);
-                    }
+                match code_block_image(text) {
+                    Some((img, height_mm)) => doc.push(KeepTogether::new(img, height_mm)),
+                    None => doc.push(code_block_element(text)),
                 }
                 doc.push(elements::Break::new(GAP_CODE));
             }
-            Block::ListItem { marker, depth, runs } => {
+            Block::ListItem { marker, depth, checked, runs } => {
                 // Editor: pl-6 lists — four spaces per depth level + marker.
                 let indent = "    ".repeat(depth.saturating_add(1));
-                doc.push(styled_par(&format!("{indent}{marker}"), runs));
+                // ASCII, not a Unicode ballot-box glyph — LiberationSans has no
+                // glyph for ☑/☐ and renders a tofu box instead.
+                let prefix = match checked {
+                    Some(true) => "[x] ".to_string(),
+                    Some(false) => "[ ] ".to_string(),
+                    None => marker.clone(),
+                };
+                doc.push(styled_par(&format!("{indent}{prefix}"), runs));
                 doc.push(elements::Break::new(GAP_LIST_ITEM));
+            }
+            Block::Table { rows } => {
+                doc.push(build_table(rows)?);
+                doc.push(elements::Break::new(GAP_PARAGRAPH));
+            }
+            Block::Diagram(source) => {
+                let rendered = diagrams
+                    .get(source)
+                    .and_then(|bytes| make_pdf_image(bytes).ok())
+                    .or_else(|| code_block_image(source));
+                match rendered {
+                    Some((img, height_mm)) => doc.push(KeepTogether::new(img, height_mm)),
+                    None => doc.push(code_block_element(source)),
+                }
+                doc.push(elements::Break::new(GAP_IMAGE));
             }
             Block::Image { alt, url } => {
                 if let Some(bytes) = images.get(url) {
@@ -184,7 +196,7 @@ pub fn blocks_to_pdf(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> any
 #[allow(dead_code)]
 pub fn markdown_to_pdf(md: &str) -> anyhow::Result<Vec<u8>> {
     let blocks = super::blocks::parse_markdown(md);
-    blocks_to_pdf(&blocks, &HashMap::new())
+    blocks_to_pdf(&blocks, &HashMap::new(), &HashMap::new())
 }
 
 fn heading_size(level: u8) -> u8 {
@@ -312,6 +324,111 @@ impl Element for KeepTogether {
     }
 }
 
+const CODE_BG: &str = "#272822";
+const CODE_FG: &str = "#f8f8f2";
+
+/// Renders a code block as a small PNG with the editor's dark Monokai
+/// background and embeds it via the existing image path — genpdf's public
+/// API has no way to paint a background fill (`Area::draw_line` hardcodes
+/// `has_fill: false`, and `Context` exposes only the font cache, nothing
+/// that reaches the underlying printpdf layer), so the fill happens in a
+/// tiny standalone SVG rasterized with resvg instead. Returns `None` on any
+/// failure so the caller can fall back to `code_block_element`.
+fn code_block_image(text: &str) -> Option<(elements::Image, f64)> {
+    let png = render_code_svg(text)?;
+    make_pdf_image(&png).ok()
+}
+
+fn render_code_svg(text: &str) -> Option<Vec<u8>> {
+    let lines: Vec<&str> = if text.is_empty() { vec![""] } else { text.lines().collect() };
+    let font_size = 15.0_f64;
+    let line_height = font_size * 1.5;
+    let char_width = font_size * 0.6; // monospace approximation
+    let padding = 14.0_f64;
+    let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1).max(1) as f64;
+    let width = (padding * 2.0 + max_chars * char_width).ceil().max(40.0);
+    let height = (padding * 2.0 + lines.len() as f64 * line_height).ceil().max(1.0);
+
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><rect width="100%" height="100%" rx="10" fill="{CODE_BG}"/>"#
+    );
+    for (i, line) in lines.iter().enumerate() {
+        let y = padding + (i as f64 + 0.8) * line_height;
+        svg.push_str(&format!(
+            r#"<text x="{padding}" y="{y:.1}" font-family="monospace" font-size="{font_size}" fill="{CODE_FG}" xml:space="preserve">{}</text>"#,
+            xml_escape(line),
+        ));
+    }
+    svg.push_str("</svg>");
+
+    let mut opt = resvg::usvg::Options::default();
+    // `Options::default()`'s fontdb starts empty — without loading system
+    // fonts, the <text> elements above would parse fine but render as blanks.
+    let mut fontdb = resvg::usvg::fontdb::Database::new();
+    fontdb.load_system_fonts();
+    // fontdb's own default "monospace" mapping is "Courier New", which isn't
+    // installed here (only the Liberation family is, same as genpdf's own
+    // fonts below) — without this override, `font-family="monospace"`
+    // resolves to nothing and the text silently doesn't render at all.
+    fontdb.set_monospace_family("Liberation Mono");
+    opt.fontdb = std::sync::Arc::new(fontdb);
+    let tree = resvg::usvg::Tree::from_str(&svg, &opt).ok()?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width().max(1), size.height().max(1))?;
+    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+    pixmap.encode_png().ok()
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Fallback when rasterization fails: a bordered, padded box (no fill, but
+/// still visually distinct from body text).
+fn code_block_element(text: &str) -> impl Element {
+    let mut layout = elements::LinearLayout::vertical();
+    let lines: Vec<&str> = if text.is_empty() { vec![""] } else { text.lines().collect() };
+    for line in lines {
+        let mut p = elements::Paragraph::default();
+        let rendered = if line.is_empty() { " ".to_string() } else { line.to_string() };
+        p.push_styled(rendered, Style::new().with_font_size(CODE_PT));
+        layout.push(p);
+    }
+    layout.padded(Margins::trbl(4.0, 6.0, 4.0, 6.0)).framed()
+}
+
+/// Header row cells get bold text, matching the editor's `.ProseMirror th`
+/// (genpdf has no background fill for the header shading itself).
+fn build_table(rows: &[BlockTableRow]) -> anyhow::Result<elements::TableLayout> {
+    let col_count = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0).max(1);
+    let mut table = elements::TableLayout::new(vec![1; col_count]);
+    table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
+
+    for row in rows {
+        let mut table_row = table.row();
+        for c in 0..col_count {
+            let cell_runs: &[IRun] = row.cells.get(c).map(Vec::as_slice).unwrap_or(&[]);
+            let mut p = elements::Paragraph::default();
+            if cell_runs.is_empty() {
+                p.push_styled(" ", Style::new());
+            } else {
+                for r in cell_runs {
+                    let mut style = base_style(r);
+                    if row.header {
+                        style = style.bold();
+                    }
+                    p.push_styled(r.text.clone(), style);
+                }
+            }
+            table_row = table_row.element(p.padded(Margins::trbl(1.5, 2.5, 1.5, 2.5)));
+        }
+        table_row
+            .push()
+            .map_err(|e| anyhow::anyhow!("table row: {e}"))?;
+    }
+    Ok(table)
+}
+
 fn styled_par(prefix: &str, runs: &[IRun]) -> elements::Paragraph {
     let mut p = elements::Paragraph::default();
     if !prefix.is_empty() {
@@ -327,7 +444,8 @@ fn styled_par(prefix: &str, runs: &[IRun]) -> elements::Paragraph {
     p
 }
 
-// genpdf Style supports bold/italic/size — no strikethrough/monospace switch.
+// genpdf Style supports bold/italic/size/color — no strikethrough/background
+// (so `strike`/`highlight` have no visual effect in PDF; DOCX carries those).
 fn base_style(r: &IRun) -> Style {
     let mut s = Style::new();
     if r.bold {
@@ -337,9 +455,25 @@ fn base_style(r: &IRun) -> Style {
         s = s.italic();
     }
     if r.code {
-        s = s.with_font_size(CODE_PT);
+        // Matches the editor's inline-code text tint (`#be185d`); explicit
+        // `color` below overrides it, same precedence as the editor's marks.
+        s = s.with_font_size(CODE_PT).with_color(Color::Rgb(190, 24, 93));
+    }
+    if let Some(c) = r.color.as_deref().and_then(parse_hex_color) {
+        s = s.with_color(c);
     }
     s
+}
+
+fn parse_hex_color(hex: &str) -> Option<Color> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
+    Some(Color::Rgb(r, g, b))
 }
 
 fn load_font() -> anyhow::Result<FontFamily<FontData>> {

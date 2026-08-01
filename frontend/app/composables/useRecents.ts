@@ -41,13 +41,24 @@ export function useRecents() {
     persist(recents.value.filter((e) => e.id !== id))
   }
 
+  /** Applies a title/icon change (e.g. pushed live by another viewer) to an
+   * already-recorded entry. No-op if the page isn't in the list — a page not
+   * visited yet needs no patch, and `record` will seed it fresh next visit. */
+  function rename(id: string, patch: { title?: string; icon?: string | null }) {
+    const idx = recents.value.findIndex((e) => e.id === id)
+    if (idx === -1) return
+    const next = [...recents.value]
+    next[idx] = { ...next[idx], ...patch }
+    persist(next)
+  }
+
   /** Drop entries whose page id is not in the known live set (deleted/archived). */
   function prune(validIds: Set<string>) {
     const next = pruneRecents(recents.value, validIds)
     if (next.length !== recents.value.length) persist(next)
   }
 
-  return { recents, record, remove, prune }
+  return { recents, record, remove, prune, rename }
 }
 
 if (import.meta.dev && import.meta.client) {

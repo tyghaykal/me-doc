@@ -5,7 +5,7 @@ use std::io::Cursor;
 
 use docx_rs::*;
 
-use super::blocks::{Block, Run as IRun};
+use super::blocks::{Block, Run as IRun, TableRow as BlockTableRow};
 
 const BODY: &str = "Calibri";
 const MONO: &str = "Courier New";
@@ -14,7 +14,11 @@ const PX_TO_EMU: u32 = 9525;
 /// Cap embedded images at ~6.5" wide so they fit a standard page with margins.
 const MAX_IMAGE_WIDTH_PX: u32 = 624;
 
-pub fn blocks_to_docx(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+pub fn blocks_to_docx(
+    blocks: &[Block],
+    images: &HashMap<String, Vec<u8>>,
+    diagrams: &HashMap<String, Vec<u8>>,
+) -> anyhow::Result<Vec<u8>> {
     let mut docx = Docx::new();
 
     for block in blocks {
@@ -67,13 +71,37 @@ pub fn blocks_to_docx(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> an
                     }
                 }
             }
-            Block::ListItem { marker, depth, runs } => {
+            Block::ListItem { marker, depth, checked, runs } => {
                 let indent = "    ".repeat(*depth);
-                let mut p = Paragraph::new().add_run(body_run(format!("{indent}{marker}")));
+                // ASCII, not a Unicode ballot-box glyph (☑/☐) — LiberationSans
+                // (the PDF exporter's font) has no glyph for it and renders a
+                // tofu box; DOCX shares this helper so both stay consistent.
+                let prefix = match checked {
+                    Some(true) => "[x] ".to_string(),
+                    Some(false) => "[ ] ".to_string(),
+                    None => marker.clone(),
+                };
+                let mut p = Paragraph::new().add_run(body_run(format!("{indent}{prefix}")));
                 for r in runs {
                     p = p.add_run(build_run(r));
                 }
                 docx = docx.add_paragraph(p);
+            }
+            Block::Table { rows } => {
+                docx = docx.add_table(build_table(rows));
+            }
+            Block::Diagram(source) => {
+                let rendered = diagrams.get(source).and_then(|bytes| embed_image(bytes).ok());
+                if let Some(pic) = rendered {
+                    let p = Paragraph::new().add_run(Run::new().add_image(pic));
+                    docx = docx.add_paragraph(p);
+                } else if source.is_empty() {
+                    docx = docx.add_paragraph(Paragraph::new().add_run(mono_run("")));
+                } else {
+                    for line in source.lines() {
+                        docx = docx.add_paragraph(Paragraph::new().add_run(mono_run(line)));
+                    }
+                }
             }
             Block::Image { alt, url } => {
                 if let Some(bytes) = images.get(url) {
@@ -108,7 +136,42 @@ pub fn blocks_to_docx(blocks: &[Block], images: &HashMap<String, Vec<u8>>) -> an
 #[allow(dead_code)]
 pub fn markdown_to_docx(md: &str) -> anyhow::Result<Vec<u8>> {
     let blocks = super::blocks::parse_markdown(md);
-    blocks_to_docx(&blocks, &HashMap::new())
+    blocks_to_docx(&blocks, &HashMap::new(), &HashMap::new())
+}
+
+/// Header row cells get bold text + a light shaded background, matching the
+/// editor's `.ProseMirror th` styling.
+fn build_table(rows: &[BlockTableRow]) -> Table {
+    let table_rows: Vec<TableRow> = rows
+        .iter()
+        .map(|row| {
+            let cells: Vec<TableCell> = row
+                .cells
+                .iter()
+                .map(|cell_runs| {
+                    let mut p = Paragraph::new();
+                    if cell_runs.is_empty() {
+                        p = p.add_run(body_run(""));
+                    } else {
+                        for r in cell_runs {
+                            let mut run = build_run(r);
+                            if row.header {
+                                run = run.bold();
+                            }
+                            p = p.add_run(run);
+                        }
+                    }
+                    let mut cell = TableCell::new().add_paragraph(p);
+                    if row.header {
+                        cell = cell.shading(Shading::new().fill("FAFAFA"));
+                    }
+                    cell
+                })
+                .collect();
+            TableRow::new(cells)
+        })
+        .collect();
+    Table::new(table_rows)
 }
 
 fn image_fallback(alt: &str) -> String {
@@ -149,13 +212,27 @@ fn body_run(text: impl Into<String>) -> Run {
     Run::new().add_text(text).fonts(body_fonts())
 }
 
+/// Code *block* styling — matches the editor's `.ProseMirror pre` (a dark
+/// Monokai look regardless of app theme).
 fn mono_run(text: impl Into<String>) -> Run {
-    Run::new().add_text(text).fonts(mono_fonts()).size(18) // 9pt
+    Run::new()
+        .add_text(text)
+        .fonts(mono_fonts())
+        .size(18) // 9pt
+        .color("F8F8F2")
+        .shading(Shading::new().fill("272822"))
 }
 
 fn build_run(r: &IRun) -> Run {
     let mut run = if r.code {
-        mono_run(&r.text)
+        // Inline code — matches the editor's `.ProseMirror code` (light-theme
+        // values; export has no app-theme concept to key off).
+        Run::new()
+            .add_text(&r.text)
+            .fonts(mono_fonts())
+            .size(18)
+            .color("BE185D")
+            .shading(Shading::new().fill("F5F5F5"))
     } else {
         body_run(&r.text)
     };
@@ -168,5 +245,15 @@ fn build_run(r: &IRun) -> Run {
     if r.strike {
         run = run.strike();
     }
+    if let Some(hex) = &r.highlight {
+        run = run.shading(Shading::new().fill(strip_hash(hex)));
+    }
+    if let Some(hex) = &r.color {
+        run = run.color(strip_hash(hex));
+    }
     run
+}
+
+fn strip_hash(hex: &str) -> String {
+    hex.trim_start_matches('#').to_string()
 }

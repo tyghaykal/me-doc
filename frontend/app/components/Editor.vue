@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import * as Y from 'yjs'
+import { NodeSelection } from '@tiptap/pm/state'
 import { WebsocketProvider } from 'y-websocket'
 import { EditorContent, useEditor, type Editor } from '@tiptap/vue-3'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
@@ -60,7 +61,7 @@ let titleTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleTitleSave() {
   clearTimeout(titleTimer)
   titleTimer = setTimeout(() => {
-    pagesStore.updatePage(props.pageId, { title: titleDraft.value || 'Untitled' })
+    pagesStore.updatePage(props.pageId, { title: titleDraft.value || 'Untitled' }, props.linkToken)
   }, 800)
 }
 
@@ -81,7 +82,7 @@ watch(
 function setIcon(icon: string | null) {
   iconDraft.value = icon ?? ''
   iconPickerOpen.value = false
-  pagesStore.updatePage(props.pageId, { icon })
+  pagesStore.updatePage(props.pageId, { icon }, props.linkToken)
 }
 
 // Stable-ish HSL color from the user id, so a user keeps the same cursor color.
@@ -290,7 +291,11 @@ function openBlockMenuFromGrip(e: MouseEvent) {
 function activeTextSelection(): { from: number; to: number } | undefined {
   if (!editor.value) return undefined
   const { selection } = editor.value.state
-  if (selection.empty || editor.value.isActive('table')) return undefined
+  // A single click on an atom node (diagram, image, ...) resolves to a
+  // NodeSelection, which is also non-empty — without this check it looked
+  // identical to a drag-selected text range and popped the same menu a
+  // right-click would (comment option included).
+  if (selection.empty || selection instanceof NodeSelection || editor.value.isActive('table')) return undefined
   return { from: selection.from, to: selection.to }
 }
 
@@ -506,7 +511,7 @@ onBeforeUnmount(() => {
       :readonly="readOnly"
       class="mb-2 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
       @input="!readOnly && scheduleTitleSave()"
-      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' })"
+      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' }, linkToken)"
     />
 
     <input ref="imageInput" type="file" accept="image/*" class="hidden" @change="onImageInputChange" />

@@ -21,6 +21,24 @@ const emit = defineEmits<{ 'update:source': [string] }>()
 const { isDark } = useTheme()
 const view = ref<View>('split')
 
+const fullscreen = ref(false)
+const canvasRef = ref<{ fitToView: () => void } | null>(null)
+function toggleFullscreen() {
+  fullscreen.value = !fullscreen.value
+}
+// The canvas only auto-fits once, on its first render — a fullscreen toggle
+// resizes its container dramatically, so re-fit to the new space rather than
+// leaving the diagram at whatever scale suited the old (much smaller) box.
+watch(fullscreen, async () => {
+  await nextTick()
+  canvasRef.value?.fitToView()
+})
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && fullscreen.value) fullscreen.value = false
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
 const model = computed({
   get: () => props.source,
   set: (v: string) => emit('update:source', v),
@@ -55,16 +73,22 @@ async function exportSvg() {
 
 <template>
   <div
-    class="flex flex-col overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800"
-    :class="variant === 'page' ? 'h-full' : 'h-[380px]'"
+    class="flex flex-col overflow-hidden border-neutral-200 dark:border-neutral-800"
+    :class="
+      fullscreen
+        ? 'fixed inset-0 z-50 border-0 bg-white dark:bg-neutral-900'
+        : ['rounded-xl border', variant === 'page' ? 'h-full' : 'h-[560px]']
+    "
   >
     <DiagramToolbar
       :view="view"
       :presence="presence"
       :readonly="readonly"
+      :fullscreen="fullscreen"
       @update:view="view = $event"
       @insert="insertTemplate"
       @export="exportSvg"
+      @toggle-fullscreen="toggleFullscreen"
     />
 
     <div class="grid min-h-0 flex-1" :class="view === 'split' ? 'grid-cols-2' : 'grid-cols-1'">
@@ -82,7 +106,7 @@ async function exportSvg() {
         class="min-w-0"
       />
       <div v-else-if="view !== 'code'" class="relative min-w-0">
-        <DiagramCanvas :source="source" class="h-full" />
+        <DiagramCanvas ref="canvasRef" :source="source" class="h-full" />
         <div
           v-if="view === 'diagram' && !readonly"
           class="pointer-events-none absolute inset-x-0 top-0 z-10 border-b border-amber-200 bg-amber-50/95 px-4 py-1.5 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/80 dark:text-amber-300"
