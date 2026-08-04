@@ -15,6 +15,11 @@ try {
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+  // The default (one worker per CPU core) launches more concurrent Chromium
+  // instances than the docker-compose stack + browsers fit in memory on a
+  // typical dev machine, causing spurious timeouts under load. 2 keeps runs
+  // fast without starving the stack; raise it if your machine has room.
+  workers: 2,
   retries: 0,
   reporter: 'list',
   use: {

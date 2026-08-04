@@ -19,8 +19,15 @@ async function createPage(page: Page, title: string): Promise<void> {
   await page.getByRole('button', { name: '+ New page' }).click()
   await expect(titleInput(page)).toBeVisible()
 
+  // The tree only picks up the new title once the rename PATCH resolves (no
+  // debounce, but a real round trip) — wait for it instead of racing the
+  // default assertion timeout under load.
+  const renamed = page.waitForResponse(
+    (r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname === `/pages/${page.url().split('/app/')[1]!.split('?')[0]}` && r.ok(),
+  )
   await titleInput(page).fill(title)
   await titleInput(page).blur()
+  await renamed
   await expect(treeRow(page, title)).toBeVisible()
 }
 
@@ -67,7 +74,7 @@ test('trashes a page and lists it in the trash modal', async ({ authedPage: page
   await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect(treeRow(page, title)).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Trash' }).click()
+  await page.getByRole('button', { name: 'Trash', exact: true }).click()
   const trash = page.getByRole('dialog', { name: 'Trash' })
   await expect(trash.getByText(title, { exact: true })).toBeVisible()
 

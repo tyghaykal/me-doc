@@ -193,6 +193,28 @@ curl -sk https://localhost/health
 
 ---
 
+## Testing
+
+Both suites run against the live `docker compose` stack (Postgres/Redis/MinIO/Mailpit/converter reached by service name — no mocks, no CI wiring).
+
+```bash
+docker compose up -d
+./scripts/init-minio.sh   # once, on a fresh minio-data volume
+
+# Backend — integration tests, one ephemeral DB per test
+docker compose exec backend cargo test                # all
+docker compose exec backend cargo test --test export  # one file
+
+# Frontend — Playwright E2E, driving the bundled Chromium (never Windows/system Chrome)
+cd frontend && pnpm install
+npx playwright test                          # all (workers capped at 2 in playwright.config.ts — see comment there)
+npx playwright test tests/e2e/auth.spec.ts   # one spec
+```
+
+Both suites are self-isolating: backend tests get a fresh migrated DB per test (`#[sqlx::test]`), and every frontend spec registers its own unique account, so nothing needs manual cleanup between runs.
+
+---
+
 ## Auth model (short)
 
 1. `POST /auth/register` → OTP emailed  

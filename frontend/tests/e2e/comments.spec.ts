@@ -18,7 +18,12 @@ async function addComment(page: Page, text: string, body: string): Promise<void>
   await page.keyboard.type(text)
   await expect(doc).toContainText(text)
 
-  await doc.getByText(text).click({ button: 'right' })
+  // The block menu only opens on right-click once the drag-handle extension
+  // has registered a hover over the block, so hover before right-clicking.
+  const target = doc.getByText(text)
+  await target.hover()
+  await expect(page.getByRole('button', { name: 'Open block menu' })).toBeVisible()
+  await target.click({ button: 'right' })
   await page.getByRole('button', { name: 'Comment', exact: true }).click()
   await page.getByPlaceholder('Add a comment…').fill(body)
   await page.getByRole('button', { name: 'Comment', exact: true }).click()

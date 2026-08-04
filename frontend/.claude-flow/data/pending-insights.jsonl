@@ -91,3 +91,7 @@
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/DiagramPage.vue","success":true,"timestamp":1785577549585,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/DiagramPage.vue","success":true,"timestamp":1785577553293,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/DiagramPage.vue","success":true,"timestamp":1785577561138,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/tests/e2e/pages-editor.spec.ts","success":true,"timestamp":1785857907201,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/tests/e2e/comments.spec.ts","success":true,"timestamp":1785857911351,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/tests/e2e/pages-editor.spec.ts","success":true,"timestamp":1785858099432,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/playwright.config.ts","success":true,"timestamp":1785858281556,"sessionId":null}
