@@ -48,5 +48,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # SVG and rasterize it with resvg, reusing the export's existing PNG-embed path.
 resvg = "0.47"
 
+[dev-dependencies]
+# `util` brings ServiceExt::oneshot, how tests drive the router without a socket.
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
+tokio-tungstenite = "0.24"
+
 [profile.release]
 opt-level = 2

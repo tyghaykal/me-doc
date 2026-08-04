@@ -8,8 +8,6 @@ const emit = defineEmits<{
 }>()
 
 const api = useApi()
-const config = useRuntimeConfig()
-const minioBase = config.public.minioBase
 const authStore = useAuthStore()
 
 interface Me {
@@ -34,9 +32,7 @@ const confirmPassword = ref('')
 const pwSaving = ref(false)
 const pwMessage = ref<{ ok: boolean; text: string } | null>(null)
 
-const avatarUrl = computed(() =>
-  avatarKey.value ? `${minioBase}/${avatarKey.value}` : null,
-)
+const avatarUrl = computed(() => resolveAvatarUrl(avatarKey.value))
 
 function errText(err: any, fallback: string): string {
   return err?.data?.message ?? err?.message ?? fallback
@@ -76,9 +72,9 @@ async function onAvatarChange(event: Event) {
   try {
     const { upload_url, s3_key } = await api<{ upload_url: string; s3_key: string }>(
       '/auth/me/avatar/presign',
-      { method: 'POST', body: { filename: file.name, content_type: file.type } },
+      { method: 'POST', body: { filename: file.name, content_type: file.type, size: file.size } },
     )
-    await fetch(upload_url, { method: 'PUT', body: file })
+    await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     avatarKey.value = s3_key
     if (authStore.user) authStore.user.avatar_key = s3_key
   } catch (err: any) {
@@ -172,6 +168,7 @@ watch(
             <input
               v-model="displayName"
               type="text"
+              aria-label="Display name"
               placeholder="Your name"
               class="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
@@ -199,6 +196,7 @@ watch(
             <input
               type="file"
               accept="image/*"
+              aria-label="Upload avatar"
               :disabled="avatarUploading"
               class="text-sm text-neutral-500 file:mr-3 file:rounded file:border-0 file:bg-neutral-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-neutral-700 disabled:opacity-50 dark:text-neutral-400 dark:file:bg-neutral-100 dark:file:text-neutral-900 dark:hover:file:bg-neutral-200"
               @change="onAvatarChange"
@@ -215,6 +213,7 @@ watch(
               v-model="currentPassword"
               type="password"
               required
+              aria-label="Current password"
               placeholder="Current password"
               class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
@@ -222,6 +221,7 @@ watch(
               v-model="newPassword"
               type="password"
               required
+              aria-label="New password"
               placeholder="New password"
               class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />
@@ -229,6 +229,7 @@ watch(
               v-model="confirmPassword"
               type="password"
               required
+              aria-label="Confirm new password"
               placeholder="Confirm new password"
               class="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             />

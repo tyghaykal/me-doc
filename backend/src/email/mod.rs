@@ -1,6 +1,18 @@
 use lettre::message::MultiPart;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
+/// Escapes the characters that matter inside an HTML text node/attribute.
+/// `page_title`/`inviter_email` are user-controlled and interpolated
+/// directly into the email templates below via `format!`, which does no
+/// escaping on its own.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 #[derive(Clone)]
 pub struct EmailClient {
     transport: AsyncSmtpTransport<Tokio1Executor>,
@@ -83,6 +95,10 @@ impl EmailClient {
 /// Inline-styled so it renders consistently across email clients (most strip
 /// `<style>` blocks); mirrors the app's dark, indigo-accented look.
 fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str) -> String {
+    let inviter_email = escape_html(inviter_email);
+    let page_title = escape_html(page_title);
+    let inviter_email = inviter_email.as_str();
+    let page_title = page_title.as_str();
     format!(
         r#"<!doctype html>
 <html>
@@ -170,4 +186,21 @@ fn otp_html(action: &str, code: &str) -> String {
         code = code,
         year = chrono::Utc::now().format("%Y"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn share_html_escapes_user_controlled_values() {
+        let html = share_html(
+            "attacker@example.com",
+            "<img src=x onerror=alert(document.cookie)>",
+            "https://example.com/app/page",
+            "Open the page",
+        );
+        assert!(!html.contains("<img src=x"));
+        assert!(html.contains("&lt;img src=x onerror=alert(document.cookie)&gt;"));
+    }
 }

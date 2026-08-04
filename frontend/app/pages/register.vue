@@ -44,8 +44,9 @@ async function submit() {
         <h1 class="text-3xl font-bold text-neutral-900 dark:text-neutral-100">Create account</h1>
         <p class="mt-2 text-neutral-600 dark:text-neutral-400">Sign up with your email and a password.</p>
 
-        <label class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</label>
+        <label for="register-email" class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</label>
         <input
+          id="register-email"
           v-model="email"
           type="email"
           required
@@ -53,8 +54,9 @@ async function submit() {
           class="mt-1 w-full rounded border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
         />
 
-        <label class="block mt-4 text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
+        <label for="register-password" class="block mt-4 text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
         <input
+          id="register-password"
           v-model="password"
           type="password"
           required

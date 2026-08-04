@@ -433,6 +433,57 @@ pub async fn resolve_role(
     Err(AuthError::Forbidden)
 }
 
+/// Coarser than `resolve_role` — used to gate reading a workspace's attachments,
+/// which (unlike pages) aren't linked to a specific page grant. True if the
+/// caller is a workspace member, or holds any active user-principal or
+/// link-token grant on the workspace itself or on any page inside it.
+pub async fn has_workspace_access(
+    db: &PgPool,
+    workspace_id: Uuid,
+    user_id: Option<Uuid>,
+    link_token: Option<&str>,
+) -> Result<bool, AuthError> {
+    if let Some(uid) = user_id {
+        let is_member: Option<(Uuid,)> = sqlx::query_as(
+            "select user_id from workspace_members where workspace_id = $1 and user_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(uid)
+        .fetch_optional(db)
+        .await?;
+        if is_member.is_some() {
+            return Ok(true);
+        }
+    }
+
+    if user_id.is_none() && link_token.is_none() {
+        return Ok(false);
+    }
+
+    let has_grant: Option<(i32,)> = sqlx::query_as(
+        r#"
+        select 1
+        from permissions perm
+        where (perm.principal_id = $2 or perm.link_token = $3)
+          and (perm.expires_at is null or perm.expires_at > now())
+          and (
+            (perm.subject_type = 'workspace' and perm.subject_id = $1)
+            or (perm.subject_type = 'page' and exists (
+              select 1 from pages p where p.id = perm.subject_id and p.workspace_id = $1
+            ))
+          )
+        limit 1
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(link_token)
+    .fetch_optional(db)
+    .await?;
+
+    Ok(has_grant.is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

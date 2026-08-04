@@ -2,72 +2,11 @@
 //! Each `#[sqlx::test]` gets its own freshly-migrated database (migrations in
 //! ./migrations are applied automatically); rows are inserted directly.
 
-use me_doc_backend::sharing::{resolve_role, Role};
+mod common;
+
+use common::*;
+use me_doc_backend::sharing::{has_workspace_access, resolve_role, Role};
 use sqlx::PgPool;
-use uuid::Uuid;
-
-async fn insert_user(pool: &PgPool, email: &str) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query("insert into users (id, email, password_hash) values ($1, $2, 'x')")
-        .bind(id)
-        .bind(email)
-        .execute(pool)
-        .await
-        .unwrap();
-    id
-}
-
-async fn insert_workspace(pool: &PgPool, owner_id: Uuid, slug: &str) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query("insert into workspaces (id, name, slug, owner_id) values ($1, $2, $3, $4)")
-        .bind(id)
-        .bind(slug)
-        .bind(slug)
-        .bind(owner_id)
-        .execute(pool)
-        .await
-        .unwrap();
-    id
-}
-
-async fn insert_page(pool: &PgPool, workspace_id: Uuid, parent: Option<Uuid>, created_by: Uuid, slug: &str) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query(
-        "insert into pages (id, workspace_id, parent_page_id, slug, created_by) values ($1, $2, $3, $4, $5)",
-    )
-    .bind(id)
-    .bind(workspace_id)
-    .bind(parent)
-    .bind(slug)
-    .bind(created_by)
-    .execute(pool)
-    .await
-    .unwrap();
-    id
-}
-
-async fn grant_page(pool: &PgPool, page_id: Uuid, principal_id: Uuid, role: &str) {
-    sqlx::query(
-        "insert into permissions (subject_type, subject_id, principal_type, principal_id, role)
-         values ('page', $1, 'user', $2, $3)",
-    )
-    .bind(page_id)
-    .bind(principal_id)
-    .bind(role)
-    .execute(pool)
-    .await
-    .unwrap();
-}
-
-async fn add_member(pool: &PgPool, workspace_id: Uuid, user_id: Uuid, role: &str) {
-    sqlx::query("insert into workspace_members (workspace_id, user_id, role) values ($1, $2, $3)")
-        .bind(workspace_id)
-        .bind(user_id)
-        .bind(role)
-        .execute(pool)
-        .await
-        .unwrap();
-}
 
 /// A page-level grant resolves to that role even when the user is not a member
 /// of the workspace at all.
@@ -112,4 +51,56 @@ async fn membership_fallback_maps_roles(pool: PgPool) {
 
     let guest_role = resolve_role(&pool, page, Some(guest), None).await.unwrap();
     assert_eq!(guest_role, Role::Viewer);
+}
+
+/// `has_workspace_access` (used to gate attachment/avatar reads, see
+/// finding #3 of the security audit) must accept a workspace member...
+#[sqlx::test]
+async fn workspace_access_allows_member(pool: PgPool) {
+    let owner = insert_user(&pool, "owner@example.com").await;
+    let ws = insert_workspace(&pool, owner, "ws").await;
+    add_member(&pool, ws, owner, "owner").await;
+
+    assert!(has_workspace_access(&pool, ws, Some(owner), None).await.unwrap());
+}
+
+/// ...and a non-member who was individually granted access to a page inside
+/// that workspace (an external share recipient)...
+#[sqlx::test]
+async fn workspace_access_allows_non_member_with_page_grant(pool: PgPool) {
+    let owner = insert_user(&pool, "owner@example.com").await;
+    let outsider = insert_user(&pool, "outsider@example.com").await;
+    let ws = insert_workspace(&pool, owner, "ws").await;
+    let page = insert_page(&pool, ws, None, owner, "page").await;
+    grant_page(&pool, page, outsider, "viewer").await;
+
+    assert!(has_workspace_access(&pool, ws, Some(outsider), None).await.unwrap());
+}
+
+/// ...and an anonymous caller presenting a valid public-link token for a page
+/// in that workspace...
+#[sqlx::test]
+async fn workspace_access_allows_valid_link_token(pool: PgPool) {
+    let owner = insert_user(&pool, "owner@example.com").await;
+    let ws = insert_workspace(&pool, owner, "ws").await;
+    let page = insert_page(&pool, ws, None, owner, "page").await;
+    grant_page_link(&pool, page, "tok123", "viewer").await;
+
+    assert!(has_workspace_access(&pool, ws, None, Some("tok123")).await.unwrap());
+}
+
+/// ...but must reject an unrelated user and an anonymous caller with no
+/// grant at all — this is the actual fix for the bucket having gone from
+/// "anonymous public read" to "checked before every download".
+#[sqlx::test]
+async fn workspace_access_denies_unrelated_and_anonymous(pool: PgPool) {
+    let owner = insert_user(&pool, "owner@example.com").await;
+    let stranger = insert_user(&pool, "stranger@example.com").await;
+    let ws = insert_workspace(&pool, owner, "ws").await;
+
+    assert!(!has_workspace_access(&pool, ws, Some(stranger), None).await.unwrap());
+    assert!(!has_workspace_access(&pool, ws, None, None).await.unwrap());
+    assert!(!has_workspace_access(&pool, ws, None, Some("not-a-real-token"))
+        .await
+        .unwrap());
 }

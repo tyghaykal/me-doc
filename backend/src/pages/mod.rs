@@ -2,7 +2,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::header,
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
     routing::{get, patch, post},
     Json, Router,
 };
@@ -12,7 +12,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::{error::AuthError, extractor::AuthenticatedUser};
-use crate::sharing::{PagePermission, Role};
+use crate::sharing::{self, PagePermission, Role};
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -120,6 +120,7 @@ pub fn router() -> Router<AppState> {
             get(get_page_content).put(put_page_content),
         )
         .route("/attachments/presign", post(presign_attachment))
+        .route("/attachments/download", get(download_attachment))
         .route("/workspaces/:workspace_id/search", get(search_pages))
         .route("/me/shared-pages", get(list_shared_pages))
         .route("/me/favorite-pages", get(list_favorite_pages))
@@ -164,6 +165,22 @@ where
     Ok(Some(Option::deserialize(deserializer)?))
 }
 
+/// Rejects a `parent_page_id` that doesn't belong to `workspace_id` — without
+/// this, `resolve_role`'s ancestor-walking CTE would happily cross a tenant
+/// boundary once such a page existed.
+async fn require_parent_in_workspace(
+    db: &PgPool,
+    parent_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), AuthError> {
+    if page_workspace(db, parent_id).await? != workspace_id {
+        return Err(AuthError::Validation(
+            "parent page must belong to the same workspace".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn require_membership(db: &PgPool, workspace_id: Uuid, user_id: Uuid) -> Result<(), AuthError> {
     let member: Option<(Uuid,)> = sqlx::query_as(
         "select user_id from workspace_members where workspace_id = $1 and user_id = $2",
@@ -197,6 +214,9 @@ async fn create_page(
     Json(body): Json<CreatePageRequest>,
 ) -> Result<Json<Page>, AuthError> {
     require_membership(&state.db, workspace_id, user.user_id).await?;
+    if let Some(parent_id) = body.parent_page_id {
+        require_parent_in_workspace(&state.db, parent_id, workspace_id).await?;
+    }
 
     let title = body.title.unwrap_or_else(|| "Untitled".to_string());
     let slug = slugify(&title);
@@ -413,6 +433,10 @@ async fn update_page(
         Some(v) => (true, v),
         None => (false, None),
     };
+    if let Some(new_parent_id) = parent_value {
+        let workspace_id = page_workspace(&state.db, id).await?;
+        require_parent_in_workspace(&state.db, new_parent_id, workspace_id).await?;
+    }
     let (set_icon, icon_value) = match body.icon {
         Some(v) => (true, v),
         None => (false, None),
@@ -456,16 +480,16 @@ async fn update_page(
 
 async fn delete_page(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    let workspace_id: Option<(Uuid,)> =
-        sqlx::query_as("select workspace_id from pages where id = $1")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await?;
-    let (workspace_id,) = workspace_id.ok_or(AuthError::NotFound)?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
+    // Consistent with `update_page`/`put_page_content`: page-level sharing
+    // grants a page-scoped Editor, not just a workspace member, the same
+    // rights on that page — previously this used workspace membership only,
+    // which let any member delete a page regardless of its own sharing ACL.
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
+    let id = perm.page_id;
 
     sqlx::query("update pages set archived_at = now(), updated_at = now() where id = $1")
         .bind(id)
@@ -478,10 +502,13 @@ async fn delete_page(
 async fn duplicate_page(
     State(state): State<AppState>,
     user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
 ) -> Result<Json<Page>, AuthError> {
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
+    let id = perm.page_id;
     let workspace_id = page_workspace(&state.db, id).await?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
 
     let source: Option<(Option<Uuid>, String, String)> =
         sqlx::query_as("select parent_page_id, title, kind from pages where id = $1")
@@ -690,11 +717,12 @@ async fn list_trash(
 
 async fn restore_page(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
-    Path(id): Path<Uuid>,
+    perm: PagePermission,
 ) -> Result<Json<Page>, AuthError> {
-    let workspace_id = page_workspace(&state.db, id).await?;
-    require_membership(&state.db, workspace_id, user.user_id).await?;
+    if perm.role != Role::Editor {
+        return Err(AuthError::Forbidden);
+    }
+    let id = perm.page_id;
 
     let row: PageRow = sqlx::query_as(&format!(
         "update pages set archived_at = null, updated_at = now()
@@ -708,11 +736,17 @@ async fn restore_page(
     Ok(Json(row.into()))
 }
 
+/// Mirrors nginx's `client_max_body_size 20m` — these uploads go browser to
+/// MinIO directly, bypassing nginx and the backend entirely, so the size cap
+/// has to be enforced here via a signed `Content-Length`, not just documented.
+const MAX_ATTACHMENT_BYTES: i64 = 20 * 1024 * 1024;
+
 #[derive(Deserialize)]
 struct PresignRequest {
     workspace_id: Uuid,
     filename: String,
     content_type: String,
+    size: i64,
 }
 
 async fn presign_attachment(
@@ -722,30 +756,91 @@ async fn presign_attachment(
 ) -> Result<Json<serde_json::Value>, AuthError> {
     require_membership(&state.db, body.workspace_id, user.user_id).await?;
 
-    let s3_key = format!("{}/{}-{}", body.workspace_id, Uuid::new_v4(), body.filename);
+    if body.size <= 0 || body.size > MAX_ATTACHMENT_BYTES {
+        return Err(AuthError::Validation("file too large".into()));
+    }
+    // This endpoint only backs the editor's image paste/drop/file-picker
+    // (all `accept="image/*"` client-side) — allowlist accordingly rather
+    // than trusting the client-supplied content_type for an arbitrary file.
+    if !crate::storage::is_allowed_image_type(&body.content_type) {
+        return Err(AuthError::Validation("unsupported file type".into()));
+    }
+    let filename = crate::storage::sanitize_filename(&body.filename);
+
+    let s3_key = format!("{}/{}-{}", body.workspace_id, Uuid::new_v4(), filename);
 
     let upload_url = crate::storage::presign_upload_url(
         &state.s3_presign,
         &state.config.s3_bucket,
         &s3_key,
         &body.content_type,
+        body.size,
     )
     .await?;
 
-    // ponytail: size=0 placeholder — real size unknown until upload completes; patch on confirm if needed.
     sqlx::query(
         "insert into attachments (workspace_id, page_id, s3_key, filename, mime_type, size, uploaded_by)
-         values ($1, null, $2, $3, $4, 0, $5)",
+         values ($1, null, $2, $3, $4, $5, $6)",
     )
     .bind(body.workspace_id)
     .bind(&s3_key)
-    .bind(&body.filename)
+    .bind(&filename)
     .bind(&body.content_type)
+    .bind(body.size)
     .bind(user.user_id)
     .execute(&state.db)
     .await?;
 
     Ok(Json(serde_json::json!({ "upload_url": upload_url, "s3_key": s3_key })))
+}
+
+#[derive(Deserialize)]
+struct AttachmentDownloadQuery {
+    key: String,
+    /// Public-link viewers/editors have no session cookie at all — same
+    /// `?link=` fallback the REST/WS endpoints use.
+    link: Option<String>,
+}
+
+/// The bucket itself is private (no anonymous read) — this is the
+/// authenticated gate in front of it. `key` always starts with the owning
+/// workspace's id (`{workspace_id}/{uuid}-{filename}`, set at presign time),
+/// so access is checked against that workspace via `has_workspace_access`
+/// rather than trusting the URL alone.
+///
+/// Auth comes from the `refresh_token` cookie (peeked, not consumed) rather
+/// than a bearer/query token: this URL gets persisted verbatim inside a
+/// document's content, so it can't carry a short-lived access token that
+/// would expire and permanently break the image. The browser attaches the
+/// httpOnly cookie automatically on a same-origin `<img src>` request.
+async fn download_attachment(
+    State(state): State<AppState>,
+    cookies: tower_cookies::Cookies,
+    Query(q): Query<AttachmentDownloadQuery>,
+) -> Result<Redirect, AuthError> {
+    let workspace_id = q
+        .key
+        .split('/')
+        .next()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or(AuthError::NotFound)?;
+
+    // A stale/expired cookie shouldn't hard-fail the request — fall back to
+    // the `?link=` grant (if any) exactly as if there were no cookie at all.
+    let user_id = match cookies.get("refresh_token") {
+        Some(c) => crate::auth::tokens::peek_refresh_token(&state.db, c.value())
+            .await
+            .ok(),
+        None => None,
+    };
+    if !sharing::has_workspace_access(&state.db, workspace_id, user_id, q.link.as_deref()).await? {
+        return Err(AuthError::Forbidden);
+    }
+
+    let url =
+        crate::storage::presign_download_url(&state.s3_presign, &state.config.s3_bucket, &q.key)
+            .await?;
+    Ok(Redirect::temporary(&url))
 }
 
 #[derive(Deserialize)]

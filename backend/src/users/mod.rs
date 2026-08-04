@@ -1,5 +1,6 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
+    response::Redirect,
     routing::{get, post},
     Json, Router,
 };
@@ -17,6 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/me", get(get_me).patch(update_me))
         .route("/me/password", post(change_password))
         .route("/me/avatar/presign", post(presign_avatar))
+        .route("/avatars/download", get(download_avatar))
 }
 
 #[derive(Serialize)]
@@ -113,10 +115,45 @@ async fn change_password(
     Ok(Json(json!({ "message": "password changed" })))
 }
 
+const MAX_AVATAR_BYTES: i64 = 5 * 1024 * 1024;
+
+#[derive(Deserialize)]
+struct AvatarDownloadQuery {
+    key: String,
+}
+
+/// Avatars are low-sensitivity and meant to be visible to any collaborator
+/// across workspaces (comments, presence, shared pages), so unlike
+/// attachments this only requires the caller to be logged in — no
+/// per-workspace check.
+///
+/// Auth comes from the `refresh_token` cookie (peeked, not consumed), same
+/// reasoning as `pages::download_attachment`: this URL is persisted (e.g. in
+/// `useCollab`'s presence payload, cached UI state) and can't carry a
+/// short-lived access token.
+async fn download_avatar(
+    State(state): State<AppState>,
+    cookies: tower_cookies::Cookies,
+    Query(q): Query<AvatarDownloadQuery>,
+) -> Result<Redirect, AuthError> {
+    let Some(cookie) = cookies.get("refresh_token") else {
+        return Err(AuthError::InvalidToken);
+    };
+    crate::auth::tokens::peek_refresh_token(&state.db, cookie.value()).await?;
+    if !q.key.starts_with("avatars/") {
+        return Err(AuthError::NotFound);
+    }
+    let url =
+        crate::storage::presign_download_url(&state.s3_presign, &state.config.s3_bucket, &q.key)
+            .await?;
+    Ok(Redirect::temporary(&url))
+}
+
 #[derive(Deserialize)]
 struct PresignAvatarRequest {
     filename: String,
     content_type: String,
+    size: i64,
 }
 
 async fn presign_avatar(
@@ -124,13 +161,21 @@ async fn presign_avatar(
     user: AuthenticatedUser,
     Json(body): Json<PresignAvatarRequest>,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    let s3_key = format!("avatars/{}/{}-{}", user.user_id, Uuid::new_v4(), body.filename);
+    if body.size <= 0 || body.size > MAX_AVATAR_BYTES {
+        return Err(AuthError::Validation("file too large".into()));
+    }
+    if !crate::storage::is_allowed_image_type(&body.content_type) {
+        return Err(AuthError::Validation("unsupported file type".into()));
+    }
+    let filename = crate::storage::sanitize_filename(&body.filename);
+    let s3_key = format!("avatars/{}/{}-{}", user.user_id, Uuid::new_v4(), filename);
 
     let upload_url = crate::storage::presign_upload_url(
         &state.s3_presign,
         &state.config.s3_bucket,
         &s3_key,
         &body.content_type,
+        body.size,
     )
     .await?;
 

@@ -70,7 +70,11 @@ async fn export_page(
             let urls = blocks::collect_image_urls(&parsed);
             let images = blocks::fetch_images(&urls).await;
             let diagram_sources = blocks::collect_diagram_sources(&parsed);
-            let diagrams = blocks::fetch_diagrams(&diagram_sources).await;
+            let diagrams = blocks::fetch_diagrams(
+                &diagram_sources,
+                state.config.export_diagram_render_enabled,
+            )
+            .await;
             if format == "docx" {
                 (
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

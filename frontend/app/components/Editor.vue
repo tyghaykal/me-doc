@@ -45,7 +45,6 @@ const api = useApi()
 const auth = useAuthStore()
 const pagesStore = usePagesStore()
 const config = useRuntimeConfig()
-const minioBase = config.public.minioBase
 
 const doc = new Y.Doc()
 
@@ -114,11 +113,11 @@ async function uploadImage(file: File): Promise<string> {
     '/attachments/presign',
     {
       method: 'POST',
-      body: { workspace_id: props.workspaceId, filename: file.name, content_type: file.type },
+      body: { workspace_id: props.workspaceId, filename: file.name, content_type: file.type, size: file.size },
     },
   )
   await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
-  return `${minioBase}/${s3_key}`
+  return resolveAttachmentUrl(s3_key)
 }
 
 function imagesFrom(items: DataTransferItemList | FileList | undefined): File[] {
@@ -335,7 +334,7 @@ const currentUser = {
   name: auth.user?.display_name || auth.user?.email || 'Anonymous',
   email: auth.user?.email ?? null,
   color: userColor(auth.user?.id ?? props.pageId),
-  avatarUrl: auth.user?.avatar_key ? `${minioBase}/${auth.user.avatar_key}` : null,
+  avatarUrl: resolveAvatarUrl(auth.user?.avatar_key),
 }
 
 // Presence list: who else is viewing/editing right now. Read directly from

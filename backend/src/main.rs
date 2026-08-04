@@ -1,13 +1,11 @@
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::Method;
-use axum::{routing::get, Router};
-use me_doc_backend::{auth, collab, comments, config, convert, db, email::EmailClient, export, health, pages, sharing, storage, users, versions, workspaces, AppState};
+use me_doc_backend::{auth, collab, comments, config, db, email::EmailClient, storage, AppState};
 use redis::Client as RedisClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_cookies::CookieManagerLayer;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -87,29 +85,12 @@ async fn main() -> anyhow::Result<()> {
         comments: comments::realtime::new_hub(),
     };
 
-    let app = Router::new()
-        .route("/health", get(health::health))
-        .nest(
-            "/auth",
-            auth::sensitive_router()
-                .layer(GovernorLayer { config: strict_conf })
-                .merge(auth::router())
-                .merge(users::router()),
-        )
-        .nest("/workspaces", workspaces::router())
-        .merge(pages::router())
-        .merge(convert::router())
-        .merge(sharing::router())
-        .merge(collab::router())
-        .merge(export::router())
-        .merge(versions::router())
-        .merge(comments::router())
-        .merge(comments::realtime::router())
-        .layer(GovernorLayer { config: standard_conf })
-        .layer(CookieManagerLayer::new())
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    let app = me_doc_backend::build_app_with_sensitive(
+        auth::sensitive_router().layer(GovernorLayer { config: strict_conf }),
+        state,
+    )
+    .layer(GovernorLayer { config: standard_conf })
+    .layer(cors);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], backend_port));
     tracing::info!("listening on {addr}");

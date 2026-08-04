@@ -8,6 +8,7 @@
 //! fiddly inline-mark parsing so we don't reinvent it.
 
 use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -318,23 +319,118 @@ pub fn collect_diagram_sources(blocks: &[Block]) -> Vec<String> {
     sources
 }
 
+/// Rejects loopback/private/link-local/unspecified addresses (IPv4, IPv6,
+/// and IPv4-mapped IPv6) so a resolved host can't point at the Docker-internal
+/// network (postgres/redis/minio/backend/...) or a cloud metadata endpoint
+/// (`169.254.169.254` is link-local). This is the actual security boundary —
+/// checking the URL string is not enough, since a hostname can resolve to
+/// anything.
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => is_public_ipv4(v4),
+        std::net::IpAddr::V6(v6) => {
+            let segs = v6.segments();
+            // IPv4-mapped (::ffff:a.b.c.d): check the embedded IPv4 address too.
+            if segs[0..5] == [0, 0, 0, 0, 0] && segs[5] == 0xffff {
+                let mapped = Ipv4Addr::new(
+                    (segs[6] >> 8) as u8,
+                    segs[6] as u8,
+                    (segs[7] >> 8) as u8,
+                    segs[7] as u8,
+                );
+                return is_public_ipv4(mapped);
+            }
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (segs[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+                || (segs[0] & 0xfe00) == 0xfc00) // fc00::/7 unique local
+        }
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    !(ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || (ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64)) // 100.64.0.0/10 (CGNAT)
+}
+
+/// Resolves `host:port` and confirms every resolved address is public.
+/// Fails closed: an empty/failed resolution is treated as not-public.
+async fn host_is_public(host: &str, port: u16) -> bool {
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => {
+            let addrs: Vec<SocketAddr> = addrs.collect();
+            !addrs.is_empty() && addrs.iter().all(|a| is_public_ip(a.ip()))
+        }
+        Err(_) => false,
+    }
+}
+
+/// Validates a URL is `http(s)` and its host resolves only to public
+/// addresses. Re-run on every redirect hop, not just the original URL —
+/// otherwise a public URL that 302s to an internal one would slip through.
+async fn is_safe_fetch_target(url: &reqwest::Url) -> bool {
+    let scheme_ok = url.scheme() == "http" || url.scheme() == "https";
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let port = url
+        .port_or_known_default()
+        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    scheme_ok && host_is_public(host, port).await
+}
+
+/// GETs `url`, manually validating and following redirects (up to
+/// `max_redirects`) so every hop — not just the first URL — is checked
+/// against `is_safe_fetch_target`.
+async fn safe_get(
+    client: &reqwest::Client,
+    url: &str,
+    max_redirects: u8,
+) -> Option<reqwest::Response> {
+    let mut current = reqwest::Url::parse(url).ok()?;
+    for _ in 0..=max_redirects {
+        if !is_safe_fetch_target(&current).await {
+            return None;
+        }
+        let resp = client.get(current.clone()).send().await.ok()?;
+        if resp.status().is_redirection() {
+            let location = resp.headers().get(reqwest::header::LOCATION)?.to_str().ok()?;
+            current = current.join(location).ok()?;
+            continue;
+        }
+        return Some(resp);
+    }
+    None
+}
+
 /// Best-effort render of Mermaid sources to PNG via the public mermaid.ink
 /// service — there's no Mermaid renderer in the Rust ecosystem, and this repo's
 /// Rust-only backend has no headless browser to run the real thing. Failures
 /// (network, unreachable, bad diagram) are omitted from the map so callers can
 /// fall back to printing the source as text.
+///
+/// Off by default: this sends the diagram's full source text to a third-party
+/// service on every export, which conflicts with a "your data stays on your
+/// deployment" privacy posture unless an operator explicitly opts in.
 /// ponytail: third-party dependency at export time, so a self-hosted/air-gapped
 /// deployment silently loses diagram images in exports — upgrade path is a
 /// local Mermaid CLI/headless-Chrome render service if that matters later.
-pub async fn fetch_diagrams(sources: &[String]) -> HashMap<String, Vec<u8>> {
+pub async fn fetch_diagrams(sources: &[String], enabled: bool) -> HashMap<String, Vec<u8>> {
     let mut out = HashMap::new();
-    if sources.is_empty() {
+    if sources.is_empty() || !enabled {
         return out;
     }
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(c) => c,
@@ -346,22 +442,23 @@ pub async fn fetch_diagrams(sources: &[String]) -> HashMap<String, Vec<u8>> {
     for source in sources {
         let encoded = URL_SAFE_NO_PAD.encode(source.as_bytes());
         let url = format!("https://mermaid.ink/img/{encoded}?bgColor=white");
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
+        if let Some(resp) = safe_get(&client, &url, 5).await {
+            if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if !bytes.is_empty() && bytes.len() <= MAX_BYTES {
                         out.insert(source.clone(), bytes.to_vec());
                     }
                 }
             }
-            _ => {}
         }
     }
     out
 }
 
-/// Best-effort HTTP fetch of image URLs. Failures are omitted from the map so
-/// renderers can fall back to alt text. Caps each body at 8 MiB.
+/// Best-effort HTTP fetch of image URLs found in document content. Failures
+/// (including a URL that resolves to a non-public address, per
+/// `is_safe_fetch_target`) are omitted from the map so renderers fall back to
+/// alt text. Caps each body at 8 MiB.
 pub async fn fetch_images(urls: &[String]) -> HashMap<String, Vec<u8>> {
     let mut out = HashMap::new();
     if urls.is_empty() {
@@ -370,7 +467,7 @@ pub async fn fetch_images(urls: &[String]) -> HashMap<String, Vec<u8>> {
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(c) => c,
@@ -380,22 +477,47 @@ pub async fn fetch_images(urls: &[String]) -> HashMap<String, Vec<u8>> {
     const MAX_BYTES: usize = 8 * 1024 * 1024;
 
     for url in urls {
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            continue;
-        }
-        match client.get(url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.bytes().await {
-                    Ok(bytes) if bytes.len() <= MAX_BYTES && !bytes.is_empty() => {
+        if let Some(resp) = safe_get(&client, url, 5).await {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes().await {
+                    if !bytes.is_empty() && bytes.len() <= MAX_BYTES {
                         out.insert(url.clone(), bytes.to_vec());
                     }
-                    _ => {}
                 }
             }
-            _ => {}
         }
     }
     out
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::*;
+    use std::net::IpAddr;
+
+    #[test]
+    fn rejects_loopback_and_private() {
+        assert!(!is_public_ip("127.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(!is_public_ip("10.0.0.5".parse::<IpAddr>().unwrap()));
+        assert!(!is_public_ip("172.20.0.3".parse::<IpAddr>().unwrap()));
+        assert!(!is_public_ip("192.168.1.1".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn rejects_link_local_metadata_endpoint() {
+        assert!(!is_public_ip("169.254.169.254".parse::<IpAddr>().unwrap()));
+        assert!(!is_public_ip("fe80::1".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn rejects_ipv4_mapped_private() {
+        assert!(!is_public_ip("::ffff:10.0.0.1".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn accepts_public_ip() {
+        assert!(is_public_ip("8.8.8.8".parse::<IpAddr>().unwrap()));
+    }
 }
 
 fn flush_item(

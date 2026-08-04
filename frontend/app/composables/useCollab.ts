@@ -33,7 +33,6 @@ interface CollabOptions {
 export function useCollab(opts: CollabOptions) {
   const auth = useAuthStore()
   const config = useRuntimeConfig()
-  const minioBase = config.public.minioBase as string
   const wsBase = (config.public.apiBase as string).replace(/^http/, 'ws')
 
   const doc = new Y.Doc()
@@ -46,7 +45,7 @@ export function useCollab(opts: CollabOptions) {
     name: auth.user?.display_name || auth.user?.email || 'Anonymous',
     email: auth.user?.email ?? null,
     color: userColor(auth.user?.id ?? opts.pageId),
-    avatarUrl: auth.user?.avatar_key ? `${minioBase}/${auth.user.avatar_key}` : null,
+    avatarUrl: resolveAvatarUrl(auth.user?.avatar_key),
   }
 
   const presence = ref<PresenceUser[]>([])

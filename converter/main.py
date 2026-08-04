@@ -25,6 +25,20 @@ def health():
     return {"status": "ok"}
 
 
+# Mirrors the formats the frontend's import file picker offers — keeps
+# markitdown's format sniffing (which leans on the extension) working while
+# never handing an attacker-controlled string straight to a filesystem API.
+ALLOWED_SUFFIXES = {
+    ".md", ".txt", ".docx", ".doc", ".pdf", ".xlsx", ".xls",
+    ".pptx", ".ppt", ".epub", ".html", ".htm", ".csv",
+}
+
+
+def _safe_suffix(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    return suffix if suffix in ALLOWED_SUFFIXES else ""
+
+
 @app.post("/convert")
 async def convert(file: UploadFile = File(...)):
     data = await file.read()
@@ -33,7 +47,7 @@ async def convert(file: UploadFile = File(...)):
     if len(data) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
 
-    suffix = Path(file.filename or "").suffix
+    suffix = _safe_suffix(file.filename or "")
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(data)
         tmp_path = tmp.name

@@ -8,8 +8,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-medoc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medoc}
       POSTGRES_DB: ${POSTGRES_DB:-medoc}
-    ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    # No host port here: only `backend` needs to reach postgres, over the
+    # compose-internal network. Dev tooling (a GUI client, `psql` from the
+    # host) gets the port back via docker-compose.override.yml.
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +22,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "${REDIS_HOST_PORT:-6380}:6379"
+    # No host port: same reasoning as postgres above.
     volumes:
       - redis-data:/data
     healthcheck:
@@ -38,9 +38,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    # Unlike postgres/redis, the S3 *API* port has to stay published even in
+    # a prod-like build: uploads/downloads go browser<->MinIO directly via
+    # presigned URLs (see backend/src/storage/mod.rs), not through the
+    # backend. Only the admin *console* is dev-only — moved to the override.
     ports:
       - "${MINIO_API_HOST_PORT:-9010}:9000"
-      - "${MINIO_CONSOLE_HOST_PORT:-9011}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -63,11 +66,14 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
       S3_BUCKET: ${S3_BUCKET:-medoc}
+    # No `mc anonymous set download`: the bucket is private. Reads go through
+    # the backend's authenticated /attachments/download and /auth/avatars/download
+    # endpoints, which check the caller's permission before handing back a
+    # short-lived presigned GET — see backend/src/storage/mod.rs.
     entrypoint: >
       sh -c "
       mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
       mc mb -p local/$$S3_BUCKET || true &&
-      mc anonymous set download local/$$S3_BUCKET &&
       echo 'bucket ready'
       "
 
@@ -121,6 +127,10 @@ services:
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@me-doc.local}
       CONVERTER_URL: http://converter:8000
+      # Off by default — sends every exported diagram's source to the public
+      # mermaid.ink service. Set to "true" only if that's acceptable for your
+      # deployment's data-handling policy.
+      EXPORT_DIAGRAM_RENDER_ENABLED: ${EXPORT_DIAGRAM_RENDER_ENABLED:-false}
       BACKEND_PORT: "8080"
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
@@ -129,8 +139,11 @@ services:
       OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
       RUST_LOG: ${RUST_LOG:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://localhost}
-    ports:
-      - "${BACKEND_HOST_PORT:-8080}:8080"
+    # No host port: all real traffic reaches the backend through nginx.
+    # Publishing this directly would also let a client bypass nginx's
+    # X-Forwarded-For and spoof the rate limiter's per-client key (see
+    # SmartIpKeyExtractor in main.rs). Dev convenience (curl'ing :8080
+    # directly) comes back via docker-compose.override.yml.
     depends_on:
       postgres:
         condition: service_healthy

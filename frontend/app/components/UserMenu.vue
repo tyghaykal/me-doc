@@ -1,8 +1,6 @@
 <script setup lang="ts">
 const api = useApi()
 const authStore = useAuthStore()
-const config = useRuntimeConfig()
-const minioBase = config.public.minioBase
 
 interface Me {
   id: string
@@ -19,7 +17,7 @@ const settingsOpen = ref(false)
 const email = computed(() => authStore.user?.email ?? '')
 const label = computed(() => displayName.value || email.value)
 const initial = computed(() => (label.value ? label.value[0]!.toUpperCase() : '?'))
-const avatarUrl = computed(() => (avatarKey.value ? `${minioBase}/${avatarKey.value}` : null))
+const avatarUrl = computed(() => resolveAvatarUrl(avatarKey.value))
 
 async function loadMe() {
   try {

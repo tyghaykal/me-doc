@@ -167,6 +167,7 @@ function close() {
             />
             <select
               v-model="inviteRole"
+              aria-label="Invite role"
               class="rounded border border-neutral-300 bg-white px-2 py-2 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             >
               <option value="viewer" class="bg-white text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
@@ -215,6 +216,7 @@ function close() {
               <span class="flex shrink-0 items-center gap-1.5">
                 <select
                   :value="grant.role"
+                  :aria-label="`Role for ${grant.email}`"
                   class="rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
                   @change="changeRole(grant, ($event.target as HTMLSelectElement).value as 'viewer' | 'editor')"
                 >
@@ -256,6 +258,7 @@ function close() {
           <div class="mt-2 flex gap-2">
             <select
               v-model="linkRole"
+              aria-label="Public link role"
               class="rounded border border-neutral-300 bg-white px-2 py-2 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             >
               <option value="viewer" class="bg-white text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
@@ -279,6 +282,7 @@ function close() {
             <input
               :value="linkUrl"
               readonly
+              aria-label="Share link"
               class="flex-1 rounded border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               @focus="($event.target as HTMLInputElement).select()"
             />

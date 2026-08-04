@@ -20,10 +20,8 @@ FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl chromium fonts-liberation \
+    ca-certificates curl fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
-
-ENV CHROMIUM_PATH=/usr/bin/chromium
 
 COPY --from=builder /app/target/release/me-doc-backend /app/me-doc-backend
 COPY --from=builder /app/migrations /app/migrations

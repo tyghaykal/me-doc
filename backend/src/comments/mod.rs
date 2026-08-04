@@ -148,12 +148,18 @@ async fn create_comment(
         .map(|e| e.trim().to_lowercase())
         .filter(|e| !e.is_empty())
     {
-        Some(email) if parent_id.is_none() => {
-            sqlx::query_scalar("select id from users where email = $1")
-                .bind(&email)
-                .fetch_optional(&state.db)
-                .await?
-        }
+        // Scoped to the page's workspace — otherwise this doubles as an
+        // any-registered-email existence oracle for anyone who can comment.
+        Some(email) if parent_id.is_none() => sqlx::query_scalar(
+            "select u.id from users u
+             join workspace_members wm on wm.user_id = u.id
+             join pages p on p.workspace_id = wm.workspace_id
+             where p.id = $1 and u.email = $2",
+        )
+        .bind(perm.page_id)
+        .bind(&email)
+        .fetch_optional(&state.db)
+        .await?,
         _ => None,
     };
 

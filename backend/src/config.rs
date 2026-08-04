@@ -23,6 +23,21 @@ pub struct Config {
     pub otp_ttl_seconds: i64,
     pub frontend_origin: String,
     pub converter_url: String,
+    /// Off by default: enabling this sends every exported diagram's full
+    /// source text to the public mermaid.ink service to render a PNG. An
+    /// operator must opt in explicitly — it's not implied by just running
+    /// the app.
+    pub export_diagram_render_enabled: bool,
+}
+
+/// Reads a required secret from the environment, rejecting both "unset" and
+/// "set to an empty string" (docker-compose substitutes the latter for an
+/// undefined `.env` variable rather than leaving it unset).
+fn non_empty_env(key: &str) -> anyhow::Result<String> {
+    match env::var(key) {
+        Ok(v) if !v.is_empty() => Ok(v),
+        _ => anyhow::bail!("{key} must be set to a non-empty value"),
+    }
 }
 
 impl Config {
@@ -45,8 +60,8 @@ impl Config {
                 .unwrap_or_else(|_| "1025".into())
                 .parse()?,
             smtp_from: env::var("SMTP_FROM").unwrap_or_else(|_| "no-reply@me-doc.local".into()),
-            jwt_access_secret: env::var("JWT_ACCESS_SECRET").unwrap_or_else(|_| "dev-secret".into()),
-            jwt_refresh_secret: env::var("JWT_REFRESH_SECRET").unwrap_or_else(|_| "dev-secret".into()),
+            jwt_access_secret: non_empty_env("JWT_ACCESS_SECRET")?,
+            jwt_refresh_secret: non_empty_env("JWT_REFRESH_SECRET")?,
             jwt_access_ttl_seconds: env::var("JWT_ACCESS_TTL_SECONDS")
                 .unwrap_or_else(|_| "900".into())
                 .parse()?,
@@ -60,6 +75,9 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
             converter_url: env::var("CONVERTER_URL")
                 .unwrap_or_else(|_| "http://converter:8000".into()),
+            export_diagram_render_enabled: env::var("EXPORT_DIAGRAM_RENDER_ENABLED")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
         })
     }
 }

@@ -70,6 +70,28 @@ fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
+/// A deliberately simple format check — not full RFC 5322, just enough to
+/// reject the obviously-invalid inputs that also happen to be dangerous
+/// (angle brackets, whitespace, control characters) before an email address
+/// is stored, sent to another user's inbox, or embedded in HTML.
+fn is_valid_email(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    let no_bad_chars = |s: &str| {
+        s.chars()
+            .all(|c| !c.is_whitespace() && !c.is_control() && c != '<' && c != '>' && c != '"')
+    };
+    !local.is_empty()
+        && !domain.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && no_bad_chars(local)
+        && no_bad_chars(domain)
+        && email.len() <= 254
+}
+
 async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
@@ -80,7 +102,7 @@ async fn register(
         ));
     }
     let email = normalize_email(&body.email);
-    if !email.contains('@') || email.len() < 3 {
+    if !is_valid_email(&email) {
         return Err(AuthError::Validation("invalid email address".into()));
     }
 
@@ -264,10 +286,38 @@ async fn issue_session(state: &AppState, cookies: &Cookies, user_id: Uuid) -> Re
 
     let mut cookie = Cookie::new("refresh_token", refresh.token);
     cookie.set_http_only(true);
+    cookie.set_secure(true);
     cookie.set_same_site(SameSite::Lax);
     cookie.set_path("/");
     cookie.set_max_age(CookieDuration::seconds(state.config.jwt_refresh_ttl_seconds));
     cookies.add(cookie);
 
     Ok(access_token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_email_accepts_normal_addresses() {
+        assert!(is_valid_email("user@example.com"));
+        assert!(is_valid_email("first.last+tag@sub.example.co"));
+    }
+
+    #[test]
+    fn valid_email_rejects_html_injection_attempts() {
+        assert!(!is_valid_email("<img src=x onerror=alert(1)>@example.com"));
+        assert!(!is_valid_email("user@example.com<script>"));
+        assert!(!is_valid_email("us er@example.com"));
+    }
+
+    #[test]
+    fn valid_email_rejects_malformed_addresses() {
+        assert!(!is_valid_email("no-at-sign"));
+        assert!(!is_valid_email("@example.com"));
+        assert!(!is_valid_email("user@"));
+        assert!(!is_valid_email("user@nodot"));
+        assert!(!is_valid_email("user@.com"));
+    }
 }

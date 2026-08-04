@@ -42,6 +42,21 @@ pub async fn issue_refresh_token(
     Ok(IssuedRefreshToken { token, expires_at })
 }
 
+/// Validates a refresh token *without* revoking it — for read-only checks
+/// (e.g. "is this browser's session still valid enough to view an image")
+/// where consuming/rotating the token would be wrong.
+pub async fn peek_refresh_token(db: &PgPool, token: &str) -> Result<Uuid, AuthError> {
+    let hash = sha256_b64(token);
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "select user_id from refresh_tokens
+         where token_hash = $1 and revoked_at is null and expires_at > now()",
+    )
+    .bind(&hash)
+    .fetch_optional(db)
+    .await?;
+    row.map(|(user_id,)| user_id).ok_or(AuthError::InvalidToken)
+}
+
 /// Validates a refresh token and revokes it (rotation is the caller's job: issue a new one after this succeeds).
 pub async fn consume_refresh_token(db: &PgPool, token: &str) -> Result<Uuid, AuthError> {
     let hash = sha256_b64(token);

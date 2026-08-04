@@ -14,15 +14,11 @@ const emit = defineEmits<{
 
 const authStore = useAuthStore()
 const pagesStore = usePagesStore()
-const config = useRuntimeConfig()
-const minioBase = config.public.minioBase
 const menuOpen = ref(false)
 const copied = ref(false)
 
 const selfName = computed(() => authStore.user?.display_name || authStore.user?.email || '')
-const selfAvatarUrl = computed(() =>
-  authStore.user?.avatar_key ? `${minioBase}/${authStore.user.avatar_key}` : null,
-)
+const selfAvatarUrl = computed(() => resolveAvatarUrl(authStore.user?.avatar_key))
 
 // The signed-in user's own account, open elsewhere (another tab/window, or a
 // second device), still shows up as a separate collaborator in `presentUsers`

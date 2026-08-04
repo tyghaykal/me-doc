@@ -39,8 +39,9 @@ async function submit() {
         <span class="font-medium text-neutral-900 dark:text-neutral-100">{{ email || 'your email' }}</span>.
       </p>
 
-      <label class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Code</label>
+      <label for="login-otp-code" class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Code</label>
       <input
+        id="login-otp-code"
         v-model="code"
         inputmode="numeric"
         maxlength="6"
