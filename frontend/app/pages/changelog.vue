@@ -28,7 +28,7 @@ onMounted(async () => {
     <div class="flex min-w-0 flex-1 flex-col bg-white dark:bg-neutral-900">
       <AppTopbar :active-page="null" />
 
-      <main class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-8">
+      <main class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-4 pt-14 sm:p-8 sm:pt-8">
         <ChangelogEntries />
       </main>
     </div>

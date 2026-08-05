@@ -282,10 +282,10 @@ onBeforeUnmount(() => {
     />
 
     <div class="flex min-w-0 flex-1 flex-col bg-white dark:bg-neutral-900">
-      <header class="flex items-center justify-between border-b border-neutral-200 px-6 py-3 dark:border-neutral-800">
+      <header class="flex items-center justify-between gap-2 border-b border-neutral-200 py-3 pl-12 pr-3 sm:pl-6 sm:pr-6 dark:border-neutral-800">
         <div class="flex min-w-0 items-center gap-2 text-sm">
           <span
-            class="flex items-center gap-1 px-1.5 py-1 text-neutral-500 dark:text-neutral-400"
+            class="hidden items-center gap-1 px-1.5 py-1 text-neutral-500 sm:flex dark:text-neutral-400"
             title="Stored on this device only — never uploaded or shared"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
@@ -294,12 +294,12 @@ onBeforeUnmount(() => {
             Offline
           </span>
           <span class="shrink-0">{{ DEFAULT_PAGE_ICON }}</span>
-          <span class="min-w-0 font-medium text-neutral-900 dark:text-neutral-100">{{ title || 'Untitled' }}</span>
+          <span class="min-w-0 truncate font-medium text-neutral-900 dark:text-neutral-100">{{ title || 'Untitled' }}</span>
         </div>
 
         <div class="flex shrink-0 items-center gap-3">
           <span
-            class="flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-neutral-400 dark:text-neutral-500"
+            class="hidden items-center gap-1.5 px-1.5 py-0.5 text-xs text-neutral-400 sm:flex dark:text-neutral-500"
             :class="saving ? 'text-teal-600 dark:text-teal-400' : ''"
           >
             <svg
@@ -362,7 +362,7 @@ onBeforeUnmount(() => {
 
       <input ref="fileInput" type="file" accept=".md,.markdown,text/markdown" class="hidden" @change="onFileInputChange" />
 
-      <main ref="editorScrollRoot" class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-8">
+      <main ref="editorScrollRoot" class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-4 sm:p-8">
         <div class="mx-auto flex w-full max-w-6xl items-start justify-center gap-10">
           <div class="min-w-0 w-full max-w-3xl">
             <p class="mb-2 text-4xl leading-none">{{ DEFAULT_PAGE_ICON }}</p>

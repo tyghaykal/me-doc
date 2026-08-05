@@ -12,23 +12,72 @@ const { isDark, toggleTheme } = useTheme()
 
 const searchOpen = ref(false)
 
+// Mobile drawer state: the sidebar is a fixed off-canvas drawer below md and an
+// in-flow column at md+. The hamburger lives here (self-contained) so the three
+// pages that embed AppSidebar don't each wire their own toggle.
+const drawerOpen = ref(false)
+
 function goHome() {
   pagesStore.activePageId = null
+  drawerOpen.value = false
 }
 
 function onKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault()
     searchOpen.value = true
+    drawerOpen.value = false
   }
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+
+function closeDrawer() {
+  drawerOpen.value = false
+}
+
+// Any navigation from inside the drawer (page tree, recents, favorites, local
+// docs) closes it so the target page isn't half-hidden behind it on mobile.
+// Watch both the URL (page-tree/local-docs navigation) and the active page
+// (recents/favorites set the store directly, which on some hosts like the
+// changelog has no route watcher to drive navigation from).
+const route = useRoute()
+watch(
+  () => route.fullPath,
+  () => (drawerOpen.value = false),
+)
+watch(
+  () => pagesStore.activePageId,
+  () => (drawerOpen.value = false),
+)
 </script>
 
 <template>
-  <aside class="thin-scrollbar flex w-64 shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950">
+  <!-- Mobile hamburger — floats above the topbar's left edge, md+ hides it. -->
+  <button
+    type="button"
+    aria-label="Toggle sidebar"
+    class="fixed left-4 top-3 z-40 rounded p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800 md:hidden"
+    :class="drawerOpen ? 'pointer-events-none opacity-0' : ''"
+    @click="drawerOpen = true"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  </button>
+
+  <!-- Mobile backdrop -->
+  <div
+    v-if="drawerOpen"
+    class="fixed inset-0 z-40 bg-black/30 md:hidden"
+    @click="closeDrawer"
+  />
+
+  <aside
+    class="thin-scrollbar flex w-64 shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3 transition-transform duration-200 dark:border-neutral-800 dark:bg-neutral-950 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl max-md:-translate-x-full"
+    :class="drawerOpen ? 'max-md:translate-x-0' : ''"
+  >
     <div class="flex flex-col gap-2">
       <div class="rounded border border-neutral-200 dark:border-neutral-800">
         <WorkspaceSwitcher @open-create="emit('open-create')" @open-members="emit('open-members')" />

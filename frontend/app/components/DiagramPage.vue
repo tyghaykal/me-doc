@@ -52,7 +52,15 @@ onBeforeUnmount(() => clearTimeout(saveTimer))
 
 // --- Title / icon (mirrors Editor.vue) ---
 const titleDraft = ref(props.title)
+const titleInput = ref<HTMLTextAreaElement | null>(null)
 watch(() => props.title, (t) => (titleDraft.value = t))
+watch(titleDraft, () => nextTick(autoGrowTitle), { immediate: true })
+function autoGrowTitle() {
+  const el = titleInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
 let titleTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleTitleSave() {
   clearTimeout(titleTimer)
@@ -108,13 +116,14 @@ function setIcon(icon: string | null) {
       </template>
     </div>
 
-    <input
+    <textarea
+      ref="titleInput"
       v-model="titleDraft"
-      type="text"
+      rows="1"
       placeholder="Untitled diagram"
       :readonly="readOnly"
-      class="mb-3 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
-      @input="!readOnly && scheduleTitleSave()"
+      class="mb-3 block w-full resize-none border-none bg-transparent text-4xl font-bold leading-tight text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
+      @input="!readOnly && (autoGrowTitle(), scheduleTitleSave())"
       @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' }, linkToken)"
     />
 

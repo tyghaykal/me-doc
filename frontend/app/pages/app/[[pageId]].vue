@@ -186,7 +186,11 @@ watch(
         @open-comments="openComments()"
       />
 
-      <main ref="editorScrollRoot" class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-8">
+      <main
+        ref="editorScrollRoot"
+        class="min-h-0 min-w-0 flex-1 overflow-y-auto thin-scrollbar p-4 sm:p-8"
+        :class="activePage ? '' : 'pt-14 sm:pt-8'"
+      >
         <!--
           TOC sits beside the document inside the same scroll surface —
           not a separate shell column — so the page still feels like one canvas.

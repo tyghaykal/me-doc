@@ -22,7 +22,7 @@ function autoGrowTitle() {
   el.style.height = 'auto'
   el.style.height = `${el.scrollHeight}px`
 }
-watch(title, () => nextTick(autoGrowTitle))
+watch(title, () => nextTick(autoGrowTitle), { immediate: true })
 
 // Same mechanism Editor.vue uses to hand its Tiptap instance up to its page
 // shell — local.vue needs the live editor's `getJSON()` (not just HTML) to

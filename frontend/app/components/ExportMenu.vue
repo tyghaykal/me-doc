@@ -43,10 +43,16 @@ async function download(ext: string) {
   <div class="relative">
     <button
       type="button"
+      :aria-label="downloading ? 'Exporting…' : 'Export'"
       class="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
       @click="open = !open"
     >
-      {{ downloading ? 'Exporting…' : 'Export' }}
+      <span class="sm:hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+          <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+      </span>
+      <span class="hidden sm:inline">{{ downloading ? 'Exporting…' : 'Export' }}</span>
     </button>
 
     <template v-if="open">

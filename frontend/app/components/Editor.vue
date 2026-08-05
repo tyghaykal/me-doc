@@ -34,7 +34,7 @@ const doc = new Y.Doc()
 
 // --- Title ---
 const titleDraft = ref(props.title)
-const titleInput = ref<HTMLInputElement | null>(null)
+const titleInput = ref<HTMLTextAreaElement | null>(null)
 watch(
   () => props.title,
   (t) => {
@@ -57,9 +57,12 @@ function autoGrowTitle() {
 
 // A long title that already exists (opened page, restored version) must be
 // expanded when the textarea first renders — the v-model doesn't fire @input.
+// `immediate` covers the very first render where a long stored title would
+// otherwise stay clipped to rows="1".
 watch(
   () => titleDraft.value,
   () => nextTick(autoGrowTitle),
+  { immediate: true },
 )
 
 function scheduleTitleSave() {
