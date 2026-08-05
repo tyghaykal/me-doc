@@ -15,10 +15,12 @@
 use axum::{
     extract::{Query, State},
     response::{IntoResponse, Redirect},
+    Json,
 };
 use rand::RngCore;
 use redis::AsyncCommands;
 use serde::Deserialize;
+use serde_json::{json, Value};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -91,6 +93,19 @@ fn authorize_url(client_id: &str, redirect_uri: &str, state: &str, verifier: &st
 pub struct CallbackQuery {
     code: String,
     state: String,
+}
+
+/// GET /auth/google/status — whether Google sign-in is configured, so the
+/// frontend can hide the button instead of it 503ing on click. No auth, no
+/// secrets in the response. Checks the fields directly rather than going
+/// through `google_config` — that helper logs a warning on every miss, which
+/// would fire on every login/register page load in a deployment that simply
+/// doesn't use Google sign-in.
+pub async fn status(State(state): State<AppState>) -> Json<Value> {
+    let enabled = state.config.google_client_id.is_some()
+        && state.config.google_client_secret.is_some()
+        && state.config.google_redirect_uri.is_some();
+    Json(json!({ "enabled": enabled }))
 }
 
 /// GET /auth/google/login — starts the flow by redirecting the browser to Google.

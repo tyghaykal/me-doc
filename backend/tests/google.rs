@@ -17,6 +17,35 @@ fn get(uri: &str) -> Request<Body> {
     Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
+/// `/auth/google/status` is what the frontend actually polls to decide
+/// whether to render the button — must track the same three-var presence
+/// check `login`/`callback` gate on.
+#[sqlx::test]
+async fn google_status_reflects_configuration(pool: PgPool) {
+    let mut state = test_state(pool).await;
+    let mut cfg = (*state.config).clone();
+    cfg.google_client_id = None;
+    cfg.google_client_secret = None;
+    cfg.google_redirect_uri = None;
+    state.config = Arc::new(cfg);
+    let app = me_doc_backend::build_app(state.clone());
+
+    let (status, _, body) = send(&app, get("/auth/google/status")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enabled"], false);
+
+    let mut cfg = (*state.config).clone();
+    cfg.google_client_id = Some("test-client-id".into());
+    cfg.google_client_secret = Some("test-client-secret".into());
+    cfg.google_redirect_uri = Some("http://localhost:8080/auth/google/callback".into());
+    state.config = Arc::new(cfg);
+    let app = me_doc_backend::build_app(state);
+
+    let (status, _, body) = send(&app, get("/auth/google/status")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enabled"], true);
+}
+
 /// With no Google client configured, starting the flow is refused with a
 /// clear 503 — the frontend hides the button when the backend says so.
 /// Explicitly clears the config regardless of ambient env so the test is

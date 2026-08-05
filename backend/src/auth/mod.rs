@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
+        .route("/google/status", axum::routing::get(google::status))
         .route("/google/login", axum::routing::get(google::login))
         .route("/google/callback", axum::routing::get(google::callback))
 }

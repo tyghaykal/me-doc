@@ -77,3 +77,8 @@
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/pages/login/google.vue","success":true,"timestamp":1785904298950,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/documentation/implementation/google-oauth-security-review.md","success":true,"timestamp":1785946351538,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/documentation/implementation/tasks.md","success":true,"timestamp":1785946369570,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/composables/useGoogleAuthEnabled.ts","success":true,"timestamp":1785949685106,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/pages/login.vue","success":true,"timestamp":1785949691244,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/pages/login.vue","success":true,"timestamp":1785949710176,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/pages/register.vue","success":true,"timestamp":1785949717497,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/pages/register.vue","success":true,"timestamp":1785949723231,"sessionId":null}
