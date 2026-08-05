@@ -56,7 +56,7 @@ function selectFeature(i: number) {
 </script>
 
 <template>
-  <section class="mx-auto max-w-5xl px-6 py-16 sm:py-20">
+  <section id="features" class="mx-auto max-w-5xl px-6 py-16 sm:py-20">
     <h2 class="text-center text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
       Everything your team needs to write
     </h2>

@@ -42,6 +42,26 @@ watch(
   },
 )
 let titleTimer: ReturnType<typeof setTimeout> | undefined
+
+// The title is a <textarea> so a long title soft-wraps onto multiple lines
+// instead of scrolling horizontally in a single-line input. rows="1" keeps
+// the initial height a single line; this grows the element to fit its content
+// (and shrinks back when text is removed). scrollHeight is clamped to the
+// content's natural height so it never counts the row below the last line.
+function autoGrowTitle() {
+  const el = titleInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
+// A long title that already exists (opened page, restored version) must be
+// expanded when the textarea first renders — the v-model doesn't fire @input.
+watch(
+  () => titleDraft.value,
+  () => nextTick(autoGrowTitle),
+)
+
 function scheduleTitleSave() {
   clearTimeout(titleTimer)
   titleTimer = setTimeout(() => {
@@ -376,16 +396,16 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
-    <input
+    <textarea
       ref="titleInput"
       v-model="titleDraft"
-      type="text"
+      rows="1"
       placeholder="Untitled"
       :readonly="readOnly"
-      class="mb-2 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
-      @input="!readOnly && scheduleTitleSave()"
+      class="mb-2 block w-full resize-none border-none bg-transparent text-4xl font-bold leading-tight text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
+      @input="!readOnly && (autoGrowTitle(), scheduleTitleSave())"
       @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft }, linkToken)"
-      @keydown="!readOnly && titleKeydown($event, { editor, input: titleInput, onTitle: (t) => { titleDraft = t; scheduleTitleSave() } })"
+      @keydown="!readOnly && titleKeydown($event, { editor, input: titleInput, onTitle: (t) => { titleDraft = t; nextTick(autoGrowTitle); scheduleTitleSave() } })"
     />
 
     <input ref="imageInput" type="file" accept="image/*" class="hidden" @change="onImageInputChange" />

@@ -43,7 +43,7 @@ export function pullTitleFromDoc(editor: Editor | null, onTitle: (title: string)
 // body promotes the body's first line into the title.
 export function titleKeydown(
   ev: KeyboardEvent,
-  opts: { editor: Editor | null; input: HTMLInputElement | null | undefined; onTitle: (t: string) => void },
+  opts: { editor: Editor | null; input: HTMLTextAreaElement | HTMLInputElement | null | undefined; onTitle: (t: string) => void },
 ): void {
   const { editor, input, onTitle } = opts
 
@@ -98,7 +98,7 @@ export function bodyBackspaceToTitle(
 // handleKeyDown; returns true when it handles the keypress.
 export function bodyArrowUpToTitle(
   ev: KeyboardEvent,
-  opts: { editor: Editor | null; input: HTMLInputElement | null | undefined },
+  opts: { editor: Editor | null; input: HTMLTextAreaElement | HTMLInputElement | null | undefined },
 ): boolean {
   if (ev.key !== 'ArrowUp') return false
   if (!opts.editor) return false

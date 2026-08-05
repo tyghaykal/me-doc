@@ -12,7 +12,17 @@ const model = defineModel<string>({ required: true })
 // doubles as the Save As filename there, and write-through follows the same
 // `watch(model)` + autosave path as content edits.
 const title = defineModel<string>('title')
-const titleInput = ref<HTMLInputElement | null>(null)
+const titleInput = ref<HTMLTextAreaElement | null>(null)
+
+// Grow the title textarea to fit a long, wrapped title (see Editor.vue's
+// autoGrowTitle for the same helper).
+function autoGrowTitle() {
+  const el = titleInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+watch(title, () => nextTick(autoGrowTitle))
 
 // Same mechanism Editor.vue uses to hand its Tiptap instance up to its page
 // shell — local.vue needs the live editor's `getJSON()` (not just HTML) to
@@ -131,13 +141,14 @@ const {
   <div class="w-full">
     <input ref="imageInput" type="file" accept="image/*" class="hidden" @change="onImageInputChange" />
 
-    <input
+    <textarea
       ref="titleInput"
       v-model="title"
-      type="text"
+      rows="1"
       placeholder="Untitled"
-      class="mb-2 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
-      @keydown="titleKeydown($event, { editor, input: titleInput, onTitle: (t) => (title = t) })"
+      class="mb-2 block w-full resize-none border-none bg-transparent text-4xl font-bold leading-tight text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
+      @input="autoGrowTitle"
+      @keydown="titleKeydown($event, { editor, input: titleInput, onTitle: (t) => { title = t; nextTick(autoGrowTitle) } })"
     />
 
     <div

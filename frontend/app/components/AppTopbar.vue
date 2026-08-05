@@ -140,7 +140,7 @@ function duplicate() {
         Shared with you
       </span>
       <span class="shrink-0">{{ activePage.icon || DEFAULT_PAGE_ICON }}</span>
-      <span class="truncate font-medium text-neutral-900 dark:text-neutral-100">{{ activePage.title || 'Untitled' }}</span>
+      <span class="min-w-0 font-medium text-neutral-900 dark:text-neutral-100">{{ activePage.title || 'Untitled' }}</span>
     </div>
 
     <div class="flex shrink-0 items-center gap-3">
