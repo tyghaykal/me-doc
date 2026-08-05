@@ -11,8 +11,8 @@ RUN apk add --no-cache bash curl dcron tzdata \
  && curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc \
  && chmod +x /usr/local/bin/mc
 
-COPY backup-db.sh backup/entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/backup-db.sh /usr/local/bin/entrypoint.sh
+COPY backup-db.sh restore-db.sh backup/entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/backup-db.sh /usr/local/bin/restore-db.sh /usr/local/bin/entrypoint.sh
 
 # Drops the base image's `postgres` CMD, which would otherwise be passed to
 # the entrypoint as a stray argument.
