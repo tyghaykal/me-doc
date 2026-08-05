@@ -10,7 +10,7 @@ A self-hosted, Notion-style docs app: nested page trees, a collaborative rich-te
 
 | Area | What you get |
 |---|---|
-| **Auth** | Email + password, then a one-time code (OTP) emailed as a true second factor. JWT access tokens + rotating httpOnly refresh cookies. |
+| **Auth** | Email + password, then a one-time code (OTP) emailed as a true second factor — or **Google sign-in** (server-side OAuth, no password/OTP). JWT access tokens + rotating httpOnly refresh cookies either way. |
 | **Workspaces & pages** | Nested page tree, drag-and-drop reparent/reorder, soft-delete (trash) + restore, full-text search. |
 | **Editor** | Tiptap (ProseMirror) rich text — headings, lists, code blocks, images (paste/drop upload via presigned MinIO URLs). |
 | **Realtime collab** | Yjs CRDT over WebSocket (`/ws/pages/:id`), live remote carets, server-side 5s debounce + disconnect persistence. |
@@ -179,6 +179,7 @@ Fill in every blank — see the comments in the file for what each one needs:
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `AI_ENCRYPTION_KEY` | Generate with `openssl rand -base64 32` (or similar) — never reuse the `.env.example` dev values. |
 | `FRONTEND_ORIGIN` | Your public `https://` origin — also drives the frontend's API base and CORS. |
 | `POSTGRES_PASSWORD` | Required — unlike dev, there's no `medoc` fallback; the stack refuses to start without it. |
+| `GOOGLE_CLIENT_ID`/`SECRET`/`REDIRECT_URI` | Optional — leave blank to skip. See [Google sign-in setup](#google-sign-in-setup) for registering your production redirect URI with Google. |
 
 ### 2. TLS cert
 
@@ -278,6 +279,15 @@ Both suites are self-isolating: backend tests get a fresh migrated DB per test (
 5. `POST /auth/refresh` → rotates the refresh token (single-use) and returns a new access JWT  
 6. `POST /auth/logout` → revokes refresh token  
 
+**Google sign-in** (alternative to 1–4, same session shape from step 6 onward):
+
+1. Frontend redirects the full page to `GET /auth/google/login` (not a fetch — the browser needs to land on Google itself)
+2. Backend redirects to Google with a CSRF `state` + PKCE challenge (verifier cached in Redis, 10 min TTL)
+3. Google redirects back to `GET /auth/google/callback`; the backend exchanges the code, upserts the user by `google_sub` (or links an existing verified-email account), sets the refresh cookie, and redirects to `{FRONTEND_ORIGIN}/oauth/google/callback`
+4. That page calls `POST /auth/refresh` for an access JWT, then enters `/app`
+
+No password is set for a Google-only account — `password_hash` is nullable, and `/auth/login`/change-password return 401 for those accounts. Unset `GOOGLE_CLIENT_ID`/`SECRET` disables the feature entirely: the backend 503s the two routes above and the frontend hides the button.
+
 Route guards:
 
 - `middleware/auth.ts` — protects `/app/**`
@@ -291,6 +301,7 @@ Route guards:
 |---|---|---|
 | GET | `/health` | Postgres + Redis liveness |
 | POST | `/auth/*` | register / login / verify / refresh / logout |
+| GET | `/auth/google/login`, `/auth/google/callback` | Google OAuth start/callback — 503 if unconfigured |
 | GET | `/workspaces`, `/workspaces/:id` | membership-scoped |
 | CRUD | `/workspaces/:id/pages`, `/pages/:id` | tree + soft delete |
 | GET/PUT | `/pages/:id/content` | raw Yjs state bytes |
@@ -319,9 +330,28 @@ Primary knobs (see `.env.example`/`.env.prod.example` and `backend/src/config.rs
 | `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Object storage |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Mailpit in dev; a real relay in production (see [Deployment](#deployment-production)) |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Token signing |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Google sign-in — leave all three blank to disable it entirely. See [Google sign-in setup](#google-sign-in-setup). |
 | `FRONTEND_ORIGIN` | CORS allow-origin (should match the nginx origin) |
 | `NUXT_PUBLIC_API_BASE` | Browser API base (nginx origin in the single-origin setup) |
 | `NUXT_API_BASE_SERVER` | Server-side fetch base (container DNS, e.g. `http://backend:8080`) |
+
+### Google sign-in setup
+
+Optional — the app works fine without it (registration falls back to email/OTP), and it's off unless configured.
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **Create credentials → OAuth client ID** → Application type **Web application**.
+2. Under **Authorized redirect URIs**, add the backend's callback — through nginx, not the frontend page from the [Auth model](#auth-model-short) step 3:
+   - Dev: `https://localhost/auth/google/callback`
+   - Production: `https://yourdomain.com/auth/google/callback`
+3. Copy the generated Client ID/Secret into `.env` (dev) or `.env.prod` (production):
+   ```env
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=https://localhost/auth/google/callback   # match step 2 exactly
+   ```
+4. Restart the backend (`docker compose up -d backend` / the prod equivalent). The "Continue with Google" button appears automatically once all three are set.
+
+Google's redirect-URI check happens in the browser, so dev's self-signed cert (browser warning aside) works fine — Google's servers never connect to your callback URL directly.
 
 ---
 
