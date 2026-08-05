@@ -17,6 +17,14 @@ pub enum AuthError {
     OtpCooldown,
     #[error("invalid or expired session")]
     InvalidToken,
+    #[error("this account uses Google sign-in, not a password")]
+    NoPassword,
+    #[error("Google sign-in is not configured")]
+    OAuthNotConfigured,
+    #[error("google oauth failed")]
+    Google(#[from] reqwest::Error),
+    #[error("google oauth failed")]
+    GoogleExchangeFailed(u16),
     #[error("not found")]
     NotFound,
     #[error("access denied")]
@@ -32,9 +40,14 @@ impl IntoResponse for AuthError {
         let status = match &self {
             AuthError::InvalidCredentials
             | AuthError::InvalidOtp
-            | AuthError::InvalidToken => StatusCode::UNAUTHORIZED,
+            | AuthError::InvalidToken
+            | AuthError::NoPassword => StatusCode::UNAUTHORIZED,
             AuthError::EmailTaken => StatusCode::CONFLICT,
             AuthError::EmailNotVerified | AuthError::Forbidden => StatusCode::FORBIDDEN,
+            AuthError::OAuthNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
+            AuthError::Google(_) | AuthError::GoogleExchangeFailed(_) => {
+                StatusCode::BAD_GATEWAY
+            }
             AuthError::NotFound => StatusCode::NOT_FOUND,
             AuthError::OtpLocked | AuthError::OtpCooldown => StatusCode::TOO_MANY_REQUESTS,
             AuthError::Validation(_) => StatusCode::BAD_REQUEST,

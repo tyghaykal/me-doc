@@ -22,6 +22,11 @@ pub struct Config {
     pub jwt_refresh_ttl_seconds: i64,
     pub otp_ttl_seconds: i64,
     pub frontend_origin: String,
+    /// Google OAuth client credentials — `None` (unset in `.env`) disables the
+    /// Google sign-in button/redirects entirely.
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
+    pub google_redirect_uri: Option<String>,
     pub converter_url: String,
     /// White-label display name, used in emails and (via the frontend's own
     /// env var) page titles. Defaults to "MeDoc" — never hardcode the name
@@ -45,6 +50,15 @@ fn non_empty_env(key: &str) -> anyhow::Result<String> {
     match env::var(key) {
         Ok(v) if !v.is_empty() => Ok(v),
         _ => anyhow::bail!("{key} must be set to a non-empty value"),
+    }
+}
+
+/// Reads an optional value — `None` when unset or blank (docker-compose
+/// substitutes an empty string for undefined `.env` vars).
+fn optional_env(key: &str) -> Option<String> {
+    match env::var(key) {
+        Ok(v) if !v.is_empty() => Some(v),
+        _ => None,
     }
 }
 
@@ -81,6 +95,9 @@ impl Config {
                 .parse()?,
             frontend_origin: env::var("FRONTEND_ORIGIN")
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
+            google_client_id: optional_env("GOOGLE_CLIENT_ID"),
+            google_client_secret: optional_env("GOOGLE_CLIENT_SECRET"),
+            google_redirect_uri: optional_env("GOOGLE_REDIRECT_URI"),
             converter_url: env::var("CONVERTER_URL")
                 .unwrap_or_else(|_| "http://converter:8000".into()),
             product_name: env::var("PRODUCT_NAME").unwrap_or_else(|_| "MeDoc".into()),

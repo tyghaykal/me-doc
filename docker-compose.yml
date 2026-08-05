@@ -143,6 +143,10 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://localhost}
       PRODUCT_NAME: ${PRODUCT_NAME:-MeDoc}
+      # Google OAuth — empty (unset in .env) disables Google sign-in entirely.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://localhost/auth/google/callback}
     # No host port: all real traffic reaches the backend through nginx.
     # Publishing this directly would also let a client bypass nginx's
     # X-Forwarded-For and spoof the rate limiter's per-client key (see

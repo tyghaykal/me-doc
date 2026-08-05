@@ -44,6 +44,14 @@ async function submit() {
         <h1 class="text-3xl font-bold text-neutral-900 dark:text-neutral-100">Log in</h1>
         <p class="mt-2 text-neutral-600 dark:text-neutral-400">Welcome back. Enter your credentials.</p>
 
+        <GoogleButton class="mt-6" />
+
+        <div class="mt-4 flex items-center gap-3">
+          <span class="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
+          <span class="text-xs text-neutral-500 dark:text-neutral-400">or</span>
+          <span class="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
+        </div>
+
         <label for="login-email" class="block mt-6 text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</label>
         <input
           id="login-email"

@@ -229,3 +229,5 @@
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/AppTopbar.vue","success":true,"timestamp":1785902207578,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/AppTopbar.vue","success":true,"timestamp":1785902259393,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/AppTopbar.vue","success":true,"timestamp":1785902268598,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/backend/migrations/0016_google_auth.sql","success":true,"timestamp":1785904760328,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/backend/migrations/0016_google_auth.sql","success":true,"timestamp":1785904770382,"sessionId":null}

@@ -89,12 +89,15 @@ async fn change_password(
     user: AuthenticatedUser,
     Json(body): Json<ChangePasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    let hash: Option<(String,)> =
+    let hash: Option<(Option<String>,)> =
         sqlx::query_as("select password_hash from users where id = $1")
             .bind(user.user_id)
             .fetch_optional(&state.db)
             .await?;
     let (hash,) = hash.ok_or(AuthError::NotFound)?;
+    let Some(hash) = hash else {
+        return Err(AuthError::NoPassword);
+    };
 
     if !password::verify_password(&body.current_password, &hash) {
         return Err(AuthError::InvalidCredentials);

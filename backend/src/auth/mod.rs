@@ -1,5 +1,6 @@
 pub mod error;
 pub mod extractor;
+pub mod google;
 pub mod jwt;
 pub mod otp;
 pub mod password;
@@ -20,6 +21,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
+        .route("/google/login", axum::routing::get(google::login))
+        .route("/google/callback", axum::routing::get(google::callback))
 }
 
 /// Credential/OTP-guessable endpoints — kept on a separate, much stricter
@@ -170,7 +173,7 @@ async fn login(
 ) -> Result<Json<Value>, AuthError> {
     let email = normalize_email(&body.email);
 
-    let row: Option<(Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+    let row: Option<(Uuid, Option<String>, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
         "select id, password_hash, email_verified_at from users where email = $1",
     )
     .bind(&email)
@@ -179,6 +182,10 @@ async fn login(
 
     let Some((_id, hash, verified_at)) = row else {
         return Err(AuthError::InvalidCredentials);
+    };
+    let Some(hash) = hash else {
+        // Google-only account — no password to verify against.
+        return Err(AuthError::NoPassword);
     };
     if !password::verify_password(&body.password, &hash) {
         return Err(AuthError::InvalidCredentials);
@@ -249,7 +256,7 @@ async fn logout(State(state): State<AppState>, cookies: Cookies) -> Result<Json<
     Ok(Json(json!({ "message": "logged out" })))
 }
 
-async fn fetch_first_workspace(
+pub(crate) async fn fetch_first_workspace(
     db: &PgPool,
     user_id: Uuid,
 ) -> Result<Option<workspaces::Workspace>, AuthError> {
@@ -268,7 +275,7 @@ async fn fetch_first_workspace(
 }
 
 /// Issues an access token and sets a fresh httpOnly refresh-token cookie, returning the access token.
-async fn issue_session(state: &AppState, cookies: &Cookies, user_id: Uuid) -> Result<String, AuthError> {
+pub(crate) async fn issue_session(state: &AppState, cookies: &Cookies, user_id: Uuid) -> Result<String, AuthError> {
     let access_token = jwt::create_access_token(
         &state.config.jwt_access_secret,
         user_id,
