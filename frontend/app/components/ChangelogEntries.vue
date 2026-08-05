@@ -4,6 +4,18 @@ const releases = [
     version: 'v0.2.0-alpha',
     entries: [
       {
+        title: 'Sign in with Google',
+        detail: 'One-click Google OAuth login and signup alongside email/password, with account linking, verified-email checks, and welcome emails on first login.',
+      },
+      {
+        title: 'Block menu on select-all',
+        detail: 'Pressing Ctrl/Cmd+A now surfaces the block menu for the full selection, so AI actions and formatting apply to whole blocks instead of partial text.',
+      },
+      {
+        title: 'Database restore script',
+        detail: 'An interactive restore-db.sh lets you pick and restore any S3-hosted Postgres backup from the command line.',
+      },
+      {
         title: 'AI writing assistant (BYOK)',
         detail: 'Rephrase, fix grammar, reformat, proofread, or explain any selection — powered by your own OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, local Ollama). Configure URL, key, and model once in Settings; keys are encrypted at rest and never leave your server.',
       },
