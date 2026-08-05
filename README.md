@@ -66,8 +66,10 @@ Deeper design notes live under [`documentation/implementation/`](documentation/i
 me-doc/
 ├── README.md
 ├── docker-compose.yml
-├── docker-compose.override.yml   # dev hot-reload volumes
-├── .env.example
+├── docker-compose.override.yml   # dev hot-reload volumes (auto-loaded)
+├── docker-compose.prod.yml       # standalone production stack
+├── .env.example                  # dev
+├── .env.prod.example             # production
 ├── backend/
 │   ├── Cargo.toml
 │   ├── Dockerfile / Dockerfile.dev
@@ -150,6 +152,58 @@ This runs a one-shot `minio/mc` container (`profiles: ["init"]`) and removes it 
 | Backend health (direct) | http://localhost:8080/health |
 
 First-time flow: **Register** → grab the 6-digit code from Mailpit → verify → land in `/app`.
+
+---
+
+## Deployment (production)
+
+`docker-compose.prod.yml` is a standalone stack, separate from the dev one above — it's not an override layered on `docker-compose.yml`, it's a complete file you run on its own. Two things it deliberately drops from dev:
+
+- **No `minio`.** Object storage is an external S3-compatible provider — Cloudflare R2, DigitalOcean Spaces, or anything else that speaks the S3 API.
+- **No `mailpit`.** Mailpit only catches mail locally and never delivers it, so production needs a real SMTP relay (SES, Postmark, Mailgun, your own server, ...).
+
+Everything provider-specific (S3 creds, SMTP relay, JWT/encryption secrets, your public origin) is a required environment variable — the stack refuses to start with a clear error if one's missing, rather than booting broken.
+
+### 1. Environment
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+Fill in every blank — see the comments in the file for what each one needs:
+
+| Variable | Notes |
+|---|---|
+| `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Your R2/Spaces bucket. R2: region `auto`; Spaces: your region, e.g. `nyc3`. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM` | A real outbound relay — OTP emails and invites go through this. |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `AI_ENCRYPTION_KEY` | Generate with `openssl rand -base64 32` (or similar) — never reuse the `.env.example` dev values. |
+| `FRONTEND_ORIGIN` | Your public `https://` origin — also drives the frontend's API base and CORS. |
+| `POSTGRES_PASSWORD` | Required — unlike dev, there's no `medoc` fallback; the stack refuses to start without it. |
+
+### 2. TLS cert
+
+Put a real certificate + key at `nginx/certs/dev.crt` and `nginx/certs/dev.key` (same filenames `nginx/conf.d/default.conf` already expects — swap the file contents, not the config, or edit `default.conf`'s `ssl_certificate`/`ssl_certificate_key` and `server_name` to match your domain instead). If TLS terminates upstream (a cloud load balancer, Cloudflare, ...), point that at nginx's :80/:443 instead and adjust `default.conf` accordingly.
+
+### 3. Create the bucket
+
+There's no equivalent of `./scripts/init-minio.sh` for a hosted provider — create the `S3_BUCKET` and `S3_BUCKET_BACKUP` buckets yourself via your provider's dashboard/CLI before starting the stack.
+
+### 4. Start the stack
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+Services: `postgres`, `redis`, `converter`, `backend`, `db-backup`, `frontend`, `nginx` — no dev bind mounts, no hot reload, no host ports beyond nginx's 80/443 (Postgres, Redis, and the backend's direct :8080 aren't published; see the comments in `docker-compose.prod.yml`).
+
+### Backups
+
+`db-backup` runs `pg_dump | gzip` → `S3_BUCKET_BACKUP` on `$BACKUP_CRON_SCHEDULE` (default nightly). Run it on demand, or restore, with:
+
+```bash
+docker compose -f docker-compose.prod.yml exec db-backup backup-db.sh
+docker compose -f docker-compose.prod.yml exec db-backup restore-db.sh   # interactive: lists backups, pick one
+```
 
 ---
 
@@ -255,15 +309,15 @@ Errors return JSON as `{ "message": "…" }` with the appropriate HTTP status.
 
 ## Configuration
 
-Primary knobs (see `.env.example` and `backend/src/config.rs`):
+Primary knobs (see `.env.example`/`.env.prod.example` and `backend/src/config.rs`):
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Postgres |
 | `REDIS_URL` | Redis |
-| `S3_ENDPOINT` / `S3_PUBLIC_ENDPOINT` | Internal MinIO vs browser-reachable host for presign |
+| `S3_ENDPOINT` / `S3_PUBLIC_ENDPOINT` | Internal vs browser-reachable host for presign — MinIO in dev, your S3-compatible provider (R2/Spaces) in production |
 | `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Object storage |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Mailpit in dev |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Mailpit in dev; a real relay in production (see [Deployment](#deployment-production)) |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Token signing |
 | `FRONTEND_ORIGIN` | CORS allow-origin (should match the nginx origin) |
 | `NUXT_PUBLIC_API_BASE` | Browser API base (nginx origin in the single-origin setup) |
@@ -289,7 +343,7 @@ Primary knobs (see `.env.example` and `backend/src/config.rs`):
 - Restoring a version while a live collab room is open won't push into that room until clients reconnect.
 - PDF export needs Liberation/DejaVu fonts on disk (already installed in both backend Docker images).
 - Image embeds in DOCX/PDF export are alt-text only (no remote fetch/embed).
-- Dev TLS is self-signed; not for production.
+- `docker compose up`'s TLS cert is self-signed (`scripts/gen-dev-cert.sh`) — see [Deployment](#deployment-production) for using a real one.
 
 ---
 

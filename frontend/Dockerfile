@@ -15,7 +15,8 @@ FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=builder /app/.output /app/.output
+COPY --from=builder --chown=node:node /app/.output /app/.output
+USER node
 
 EXPOSE 3000
 CMD ["node", ".output/server/index.mjs"]

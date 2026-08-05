@@ -26,5 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/target/release/me-doc-backend /app/me-doc-backend
 COPY --from=builder /app/migrations /app/migrations
 
+RUN useradd --system --no-create-home appuser
+USER appuser
+
 EXPOSE 8080
 CMD ["/app/me-doc-backend"]

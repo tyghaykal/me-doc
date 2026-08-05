@@ -1,0 +1,181 @@
+name: me-doc
+
+# Standalone production compose file — run with:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Differences from docker-compose.yml (dev):
+#   - No `minio` service: object storage is an external S3-compatible
+#     provider (Cloudflare R2, DigitalOcean Spaces, ...) via S3_ENDPOINT.
+#   - No `mailpit` service: mailpit only catches mail locally, it never
+#     delivers anything — SMTP_HOST/SMTP_PORT must point at a real relay.
+#   - No dev bind mounts / hot reload / host ports for postgres, redis,
+#     or the backend's direct :8080 — see docker-compose.override.yml for
+#     why those exist in dev.
+#   - env_file is .env.prod, not .env, so real secrets never share a file
+#     with the throwaway dev defaults in .env.example.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medoc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-medoc}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medoc} -d ${POSTGRES_DB:-medoc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # MarkItDown-backed doc-to-Markdown conversion for page import (docx/pdf/
+  # xlsx/epub/...). Internal-only — no published port, reached by the backend
+  # over the compose network the same way it reaches postgres/redis.
+  converter:
+    build:
+      context: ./converter
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      # Container-internal addresses always use the service's own listen port
+      # (postgres:5432, redis:6379, backend:8080) — S3_ENDPOINT/SMTP_HOST are
+      # external providers, not compose services, so they're exempt.
+      DATABASE_URL: postgres://${POSTGRES_USER:-medoc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-medoc}
+      REDIS_URL: redis://redis:6379
+      # S3-compatible object storage — an external provider (R2, Spaces, ...).
+      # S3_PUBLIC_ENDPOINT defaults to S3_ENDPOINT itself: unlike MinIO, a
+      # hosted provider serves one endpoint to both the backend and the
+      # browser (see backend/src/storage/mod.rs).
+      S3_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT must be set to your R2/Spaces endpoint}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-${S3_ENDPOINT}}
+      S3_REGION: ${S3_REGION:?S3_REGION must be set (e.g. auto for R2, nyc3 for Spaces)}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
+      S3_BUCKET: ${S3_BUCKET:-medoc}
+      # Real SMTP relay — mailpit (dev-only mail catcher) isn't in this file.
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST must be set to a real mail relay}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@me-doc.local}
+      CONVERTER_URL: http://converter:8000
+      # Off by default — sends every exported diagram's source to the public
+      # mermaid.ink service. Set to "true" only if that's acceptable for your
+      # deployment's data-handling policy.
+      EXPORT_DIAGRAM_RENDER_ENABLED: ${EXPORT_DIAGRAM_RENDER_ENABLED:-false}
+      BACKEND_PORT: "8080"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-1209600}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
+      AI_ENCRYPTION_KEY: ${AI_ENCRYPTION_KEY:?AI_ENCRYPTION_KEY must be set}
+      RUST_LOG: ${RUST_LOG:-info}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN must be set to your public https origin}
+      PRODUCT_NAME: ${PRODUCT_NAME:-MeDoc}
+      # Google OAuth — empty (unset in .env.prod) disables Google sign-in entirely.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    # No host port: all real traffic reaches the backend through nginx.
+    # Publishing this directly would also let a client bypass nginx's
+    # X-Forwarded-For and spoof the rate limiter's per-client key (see
+    # SmartIpKeyExtractor in main.rs).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      converter:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Nightly `pg_dump | gzip` → the backup bucket on the S3-compatible
+  # provider. Not on the request path and reached by nothing else, so no
+  # published port and no healthcheck — it's a crond that sleeps until
+  # $BACKUP_CRON_SCHEDULE. Run it on demand with
+  # `docker compose -f docker-compose.prod.yml exec db-backup backup-db.sh`.
+  db-backup:
+    build:
+      # Context is ./scripts (not ./scripts/backup) so the Dockerfile can copy
+      # scripts/backup-db.sh, which lives with the other operator scripts.
+      context: ./scripts
+      dockerfile: backup/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-medoc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-medoc}
+      POSTGRES_DB: ${POSTGRES_DB:-medoc}
+      S3_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT must be set to your R2/Spaces endpoint}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
+      S3_BUCKET_BACKUP: ${S3_BUCKET_BACKUP:-medoc-backup}
+      BACKUP_CRON_SCHEDULE: ${BACKUP_CRON_SCHEDULE:-0 3 * * *}
+      # Empty disables pruning entirely — backups then accumulate forever.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Browser calls go through nginx (single origin, path-based routing —
+      # see nginx/conf.d/default.conf), so this must be the nginx origin, not
+      # the container's own port. SSR fetches (NUXT_API_BASE_SERVER) bypass
+      # nginx entirely and hit the backend container directly, unaffected.
+      NUXT_PUBLIC_API_BASE: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN must be set to your public https origin}
+      NUXT_API_BASE_SERVER: http://backend:8080
+      NUXT_PUBLIC_PRODUCT_NAME: ${PRODUCT_NAME:-MeDoc}
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "${NGINX_HTTP_HOST_PORT:-80}:80"
+      - "${NGINX_HTTPS_HOST_PORT:-443}:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Put your real cert/key here as dev.crt/dev.key (or repoint
+      # nginx/conf.d/default.conf at different filenames) — nginx doesn't
+      # care where the files came from, only that they're valid.
+      - ./nginx/certs:/etc/nginx/certs:ro
+
+volumes:
+  postgres-data:
+  redis-data:
