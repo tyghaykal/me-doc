@@ -186,8 +186,10 @@ async fn login(
         return Err(AuthError::InvalidCredentials);
     };
     let Some(hash) = hash else {
-        // Google-only account — no password to verify against.
-        return Err(AuthError::NoPassword);
+        // Google-only account — no password to verify against. Same error as
+        // a wrong password so a failed login can't be used to enumerate
+        // which emails are registered or how they authenticate.
+        return Err(AuthError::InvalidCredentials);
     };
     if !password::verify_password(&body.password, &hash) {
         return Err(AuthError::InvalidCredentials);

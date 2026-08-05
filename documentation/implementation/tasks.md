@@ -297,3 +297,31 @@ Plan: `documentation/implementation/whitelabel-offline-backup-ai-plan.md`. Four 
 - [x] **#110** Postgres backup service — `scripts/backup-db.sh` (`pg_dump | gzip`, `mc cp` to `S3_BUCKET_BACKUP/backups/`, optional `BACKUP_RETENTION_DAYS`-based pruning, `pipefail` so a failed dump can't masquerade as a healthy backup), `scripts/backup/{Dockerfile,entrypoint.sh}` (postgres:16-alpine + static `mc` + dcron, crontab rendered from `BACKUP_CRON_SCHEDULE`), new `db-backup` compose service, `minio-createbuckets` extended to also create the backup bucket. `BACKUP_CRON_SCHEDULE`/`BACKUP_RETENTION_DAYS` added to `.env`/`.env.example`. Verified live: ran the script manually inside the container, confirmed the `.sql.gz` landed in MinIO (`mc ls`), and downloaded + `gunzip`'d it to confirm a valid, restorable `pg_dump` header.
 - [x] **#111** AI actions (BYOK) — migration `0015_ai_settings.sql` (`user_ai_settings`: url/model/encrypted key+nonce per user), new `aes-gcm` dependency sealing each user's key at rest under a required `AI_ENCRYPTION_KEY` (32 bytes, base64, validated at boot). `backend/src/ai/mod.rs`: `GET/PUT /ai/settings` (key never echoed back; omitting `api_key` on PUT keeps the stored one), `POST /ai/complete` (calls the user's configured OpenAI-compatible `/chat/completions` endpoint via `reqwest`, distinguishable "no AI settings configured" error). Frontend: `pages/app/settings.vue` (BYOK form, reachable from `UserMenu.vue`).
   - **Follow-up**: moved the five AI actions (Rephrase/Fix grammar/Reformat/Proofread/Explain) out of the `/` slash-command menu (removed entirely from `slash-command.ts`, including the transient status-chip UI) and into `BlockMenu.vue` — the menu Editor.vue already opens both when marking (dragging over) text and when clicking the block's grip/"line" button (`openBlockMenuFromGrip`), so both requested triggers land on one existing component for free. New "Ask AI" icon button opens an in-menu action list; each action runs against `contentRange()`, the same range the menu's existing color/formatting actions already use — the marked selection when one exists, otherwise the whole hovered block — so scope follows the trigger automatically. Loading/error states (including the "configure your provider" link to `/app/settings`) render inline in the menu instead of a floating toast. Not wired into `LocalEditor.vue` (offline mode): it has no drag-handle/block-menu infrastructure at all (a much larger, separate undertaking), so local documents currently have no AI entry point — flagged rather than silently guessed at. Verified: `ai.spec.ts`'s second test rewritten to trigger via hover + right-click (the same pattern `comments.spec.ts` already established for opening the block menu) instead of typing `/rephrase`; full 23-test suite passes (one registration-flow timeout reproduced as flaky/unrelated on retry in isolation).
+
+## Phase 18: Google OAuth security review
+
+Focused pentest of the Google OAuth feature (`02d2c2c`) after it landed.
+Full findings: `documentation/implementation/google-oauth-security-review.md`.
+
+- [x] **#112** Sanitize page titles (strip control chars) at write time — closes
+      an email header-injection vector via the share-notification Subject
+      line — *review finding #1*
+- [x] **#113** Null `password_hash` when a Google login adopts an
+      unverified/pre-registered account row — closes a latent
+      attacker-set-password persistence issue — *review finding #2*
+- [x] **#114** Check Google's `email_verified` claim before trusting the
+      userinfo email for account linking/creation — *review finding #3*
+- [x] **#115** Unify the "Google-only account" login error with the generic
+      invalid-credentials error to close an email/auth-method enumeration
+      side channel — *review finding #4*
+- [x] **#116** Run Google-sourced emails through the same `is_valid_email`
+      check applied to manually-entered ones — *review finding #5*
+- [ ] **#117** Add regression coverage for OAuth `state` single-use/replay —
+      not implemented this pass; needs a mocked Google token/userinfo
+      endpoint injected into `AppState`, a larger test-harness change than
+      this fix pass — *review finding #8, follow-up*
+
+**Not run**: `cargo build`/`cargo test` — no `cargo`/`rustc` on PATH in this
+environment. All five fixes were verified by manual code reading only
+(Rust privacy/type-checking done by hand). **Run `cargo build && cargo
+test` before merging.**

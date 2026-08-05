@@ -196,6 +196,14 @@ pub(crate) async fn require_membership(db: &PgPool, workspace_id: Uuid, user_id:
     Ok(())
 }
 
+/// Strips control characters (including CR/LF) from a user-supplied title.
+/// Titles are later interpolated into the share-notification email's Subject
+/// header (`email::send_share_notification`) — a raw newline there would be
+/// a header-injection vector.
+fn sanitize_title(title: String) -> String {
+    title.chars().filter(|c| !c.is_control()).collect()
+}
+
 fn slugify(title: &str) -> String {
     let base: String = title
         .to_lowercase()
@@ -218,7 +226,7 @@ async fn create_page(
         require_parent_in_workspace(&state.db, parent_id, workspace_id).await?;
     }
 
-    let title = body.title.unwrap_or_else(|| "Untitled".to_string());
+    let title = sanitize_title(body.title.unwrap_or_else(|| "Untitled".to_string()));
     let slug = slugify(&title);
     // Only the two known kinds; anything else falls back to a document.
     let kind = match body.kind.as_deref() {
@@ -453,7 +461,7 @@ async fn update_page(
          returning {PAGE_COLUMNS}"
     ))
     .bind(id)
-    .bind(body.title)
+    .bind(body.title.map(sanitize_title))
     .bind(body.order_index)
     .bind(set_parent)
     .bind(parent_value)
@@ -922,4 +930,18 @@ async fn search_pages(
     .await?;
 
     Ok(Json(rows.into_iter().map(Page::from).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_title_strips_crlf_and_other_control_chars() {
+        assert_eq!(
+            sanitize_title("Q1 Report\r\nBcc: attacker@evil.com".to_string()),
+            "Q1 ReportBcc: attacker@evil.com"
+        );
+        assert_eq!(sanitize_title("Normal Title".to_string()), "Normal Title");
+    }
 }

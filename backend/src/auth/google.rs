@@ -126,6 +126,14 @@ pub async fn callback(
         "Google account has no email address".into(),
     ))?;
     let email = email.trim().to_lowercase();
+    if !userinfo.email_verified {
+        return Err(AuthError::Validation(
+            "Google account email is not verified".into(),
+        ));
+    }
+    if !super::is_valid_email(&email) {
+        return Err(AuthError::Validation("invalid email address".into()));
+    }
 
     let (user_id, first_google_login, is_new_user) =
         upsert_google_user(&state, &userinfo.sub, &email, userinfo.name.as_deref()).await?;
@@ -177,6 +185,10 @@ pub async fn callback(
 struct GoogleUserInfo {
     sub: String,
     email: Option<String>,
+    /// Whether Google itself has confirmed the user owns this address.
+    /// Trusting an unverified email would let account linking/creation be
+    /// driven by an address the caller doesn't actually control.
+    email_verified: bool,
     name: Option<String>,
 }
 
@@ -230,9 +242,18 @@ async fn exchange_code(
         .as_str()
         .ok_or_else(|| AuthError::Validation("google userinfo missing sub".into()))?;
 
+    // Google's userinfo endpoint documents this as a JSON boolean, but accept
+    // a stringified "true"/"false" too rather than failing closed on a
+    // format change we don't control.
+    let email_verified = v["email_verified"]
+        .as_bool()
+        .or_else(|| v["email_verified"].as_str().map(|s| s == "true"))
+        .unwrap_or(false);
+
     Ok(GoogleUserInfo {
         sub: sub.to_string(),
         email: v["email"].as_str().map(|s| s.to_string()),
+        email_verified,
         name: v["name"].as_str().map(|s| s.to_string()),
     })
 }
@@ -290,13 +311,18 @@ async fn upsert_google_user(
     }
 
     // Brand-new account (or an unverified account with this email — adopt it:
-    // Google proving ownership is as good as the email OTP).
+    // Google proving ownership is as good as the email OTP). Adoption also
+    // nulls out password_hash: an attacker could have pre-registered this
+    // email with a password of their choosing (leaving it unverified), and
+    // without this the attacker's password would silently start working
+    // once the real owner verifies the email via Google sign-in.
     let (id,): (Uuid,) = sqlx::query_as(
         "insert into users (email, google_sub, email_verified_at, display_name, password_hash)
          values ($1, $2, now(), $3, null)
          on conflict (email) do update
            set google_sub = excluded.google_sub,
                email_verified_at = now(),
+               password_hash = null,
                display_name = coalesce(users.display_name, excluded.display_name)
          returning id",
     )
