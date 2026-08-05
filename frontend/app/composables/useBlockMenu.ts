@@ -146,6 +146,28 @@ export function useBlockMenu(editor: ReturnType<typeof useEditor>, opts?: { read
     openBlockMenu(coords.left, coords.bottom + 6, selectionRange)
   }
 
+  // Same "selection just landed → show the menu" behavior as onEditorMouseUp,
+  // for selections made without a mouse gesture to hook (Ctrl/Cmd+A). openBlockMenu()
+  // requires a hoveredBlock, which the drag-handle's mousemove tracking never
+  // set here since the pointer never touched a block — resolve one from the
+  // selection's own start so duplicate/remove/append still have a real block
+  // anchor. The AI/format actions don't need it: they scope off selectionRange.
+  function openBlockMenuFromSelection() {
+    if (!editor.value || opts?.readOnly?.()) return
+    const selectionRange = activeTextSelection()
+    if (!selectionRange) return
+    if (!hoveredBlock.value) {
+      const doc = editor.value.state.doc
+      const $from = doc.resolve(selectionRange.from)
+      const depth = $from.depth
+      const node = depth > 0 ? $from.node(depth) : doc.firstChild
+      const pos = depth > 0 ? $from.before(depth) : 0
+      if (node) hoveredBlock.value = { node, pos }
+    }
+    const coords = editor.value.view.coordsAtPos(selectionRange.to)
+    openBlockMenu(coords.left, coords.bottom + 6, selectionRange)
+  }
+
   return {
     hoveredBlock,
     blockMenu,
@@ -156,6 +178,7 @@ export function useBlockMenu(editor: ReturnType<typeof useEditor>, opts?: { read
     openBlockMenuFromContextMenu,
     onEditorMouseMove,
     onEditorMouseUp,
+    openBlockMenuFromSelection,
     onDragHandleNodeChange,
   }
 }

@@ -131,7 +131,13 @@ function selectionBlockRange() {
   const r = doc
     .resolve(props.selectionRange.from)
     .blockRange(doc.resolve(props.selectionRange.to))
-  return r ? { from: r.$from.pos, to: r.$to.pos } : blockRange()
+  // r.$from/$to are just the two resolved positions passed in, unchanged —
+  // the actual block-aligned boundaries the comment above promises are
+  // r.start/r.end. Using $from.pos/$to.pos silently degraded this to the
+  // original (non-block-aligned) marked range, so a block-shaped AI reply
+  // got inserted into the middle of the first/last paragraph instead of
+  // replacing them, leaving the other marked lines untouched.
+  return r ? { from: r.start, to: r.end } : blockRange()
 }
 
 function duplicate() {
@@ -190,8 +196,7 @@ const AI_ACTIONS = [
   { instruction: 'explain', label: 'Explain', hint: 'Add an explanation below' },
 ]
 const aiPanelOpen = ref(false)
-const aiLoading = ref(false)
-const aiError = ref<{ message: string; settingsLink: boolean } | null>(null)
+const aiError = ref<string | null>(null)
 const aiStatus = useAiStatus()
 
 function openAiPanel() {
@@ -227,76 +232,66 @@ function insertAiResult(text: string, append: boolean) {
 
 type AiResult = { result: string; usage: { prompt: number; completion: number; total: number } | null }
 
-// Shared error handling: surface in the popup and in the global toast so a
-// dismissed menu doesn't swallow the failure.
+// The request runs after the popup is already closed (see runAiAction/
+// runAiChat below), so a failure has nowhere local left to show — the global
+// toast (bottom-right) is the only surface left for it.
 function reportAiError(err: any) {
   const message = err?.data?.message
-  const popup =
-    message === 'no AI settings configured'
-      ? { message: 'Set up your AI provider to use this.', settingsLink: true }
-      : { message: message ?? 'The AI request failed.', settingsLink: false }
-  aiError.value = popup
-  aiStatus.fail(popup.message)
+  aiStatus.fail(
+    message === 'no AI settings configured' ? 'Set up your AI provider in settings to use this.' : (message ?? 'The AI request failed.'),
+  )
 }
 
 async function runAiAction(instruction: string) {
   const range = contentRange()
   const text = props.editor.state.doc.textBetween(range.from, range.to, '\n').trim()
   if (!text) {
-    aiError.value = { message: 'There is no text here yet.', settingsLink: false }
+    aiError.value = 'There is no text here yet.'
     return
   }
 
-  aiLoading.value = true
-  aiError.value = null
   aiStatus.start('Running AI…')
+  emit('close')
   let data: AiResult
   try {
     data = await api<AiResult>('/ai/complete', { method: 'POST', body: { instruction, text } })
   } catch (err: any) {
-    aiLoading.value = false
     reportAiError(err)
     return
   }
-  aiLoading.value = false
 
   insertAiResult(data.result, instruction === 'explain')
   aiStatus.succeed('AI result applied', data.usage ?? null)
-  emit('close')
 }
 
 // --- AI custom request (chat) ---
 // The user's own prompt, optionally acting on the currently selected text —
 // the selected text is appended as context so "make this more formal" works
-// on a marked range without the user re-typing it. Replies append below the
-// block, markdown-rendered, since a conversation shouldn't replace the
-// selection it was prompted from.
+// on a marked range without the user re-typing it. A marked selection gets
+// replaced by the reply, same as the preset actions below — otherwise (no
+// selection, a standalone question) the reply appends below the block.
 const chatPrompt = ref('')
 
 async function runAiChat() {
   const prompt = chatPrompt.value.trim()
   if (!prompt) return
 
-  aiLoading.value = true
-  aiError.value = null
-  aiStatus.start('Running AI…')
   const range = contentRange()
   const selectedText = props.editor.state.doc.textBetween(range.from, range.to, '\n').trim()
   const text = selectedText ? `${prompt}\n\nSelected text:\n${selectedText}` : prompt
+
+  aiStatus.start('Running AI…')
+  emit('close')
   let data: AiResult
   try {
     data = await api<AiResult>('/ai/complete', { method: 'POST', body: { instruction: 'chat', text } })
   } catch (err: any) {
-    aiLoading.value = false
     reportAiError(err)
     return
   }
-  aiLoading.value = false
 
-  chatPrompt.value = ''
-  insertAiResult(data.result, true)
+  insertAiResult(data.result, !props.selectionRange)
   aiStatus.succeed('AI reply added', data.usage ?? null)
-  emit('close')
 }
 
 // --- Comment ---
@@ -559,49 +554,40 @@ async function submitComment() {
           Ask AI — uses your own provider (<NuxtLink to="/app/settings" class="underline" @click="emit('close')">settings</NuxtLink>)
         </p>
 
-        <div v-if="aiLoading" class="px-1 py-3 text-sm text-neutral-500 dark:text-neutral-400">
-          Thinking…
+        <p v-if="aiError" class="mb-2 rounded bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+          {{ aiError }}
+        </p>
+
+        <div class="flex flex-col gap-1.5">
+          <textarea
+            v-model="chatPrompt"
+            rows="2"
+            placeholder="Ask anything…"
+            class="w-full resize-none rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+            @keydown.enter.exact.prevent="runAiChat"
+          />
+          <button
+            type="button"
+            :disabled="!chatPrompt.trim()"
+            class="self-end rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
+            @click="runAiChat"
+          >
+            Ask
+          </button>
         </div>
 
-        <template v-else>
-          <p v-if="aiError" class="mb-2 rounded bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
-            {{ aiError.message }}
-            <NuxtLink v-if="aiError.settingsLink" to="/app/settings" class="underline" @click="emit('close')">
-              Open settings
-            </NuxtLink>
-          </p>
+        <div class="my-2 border-t border-neutral-200 dark:border-neutral-800" />
 
-          <div class="flex flex-col gap-1.5">
-            <textarea
-              v-model="chatPrompt"
-              rows="2"
-              placeholder="Ask anything…"
-              class="w-full resize-none rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500"
-              @keydown.enter.exact.prevent="runAiChat"
-            />
-            <button
-              type="button"
-              :disabled="!chatPrompt.trim() || aiLoading"
-              class="self-end rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
-              @click="runAiChat"
-            >
-              Ask
-            </button>
-          </div>
-
-          <div class="my-2 border-t border-neutral-200 dark:border-neutral-800" />
-
-          <button
-            v-for="action in AI_ACTIONS"
-            :key="action.instruction"
-            type="button"
-            class="block w-full rounded px-2 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            @click="runAiAction(action.instruction)"
-          >
-            <span class="block text-neutral-900 dark:text-neutral-100">{{ action.label }}</span>
-            <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ action.hint }}</span>
-          </button>
-        </template>
+        <button
+          v-for="action in AI_ACTIONS"
+          :key="action.instruction"
+          type="button"
+          class="block w-full rounded px-2 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          @click="runAiAction(action.instruction)"
+        >
+          <span class="block text-neutral-900 dark:text-neutral-100">{{ action.label }}</span>
+          <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ action.hint }}</span>
+        </button>
 
         <div class="mt-1 flex justify-end pb-1">
           <button

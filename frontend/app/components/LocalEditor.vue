@@ -115,6 +115,7 @@ watch(model, (html) => {
 // input's @keydown handles its own select).
 function onDocKeydown(e: KeyboardEvent) {
   docSelectAllToEditor(e, editor.value)
+  if (e.defaultPrevented) openBlockMenuFromSelection()
 }
 onMounted(() => document.addEventListener('keydown', onDocKeydown))
 onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown))
@@ -133,6 +134,7 @@ const {
   openBlockMenuFromContextMenu,
   onEditorMouseMove,
   onEditorMouseUp,
+  openBlockMenuFromSelection,
   onDragHandleNodeChange,
 } = useBlockMenu(editor)
 </script>

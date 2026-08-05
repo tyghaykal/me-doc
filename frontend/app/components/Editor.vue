@@ -303,6 +303,7 @@ const {
   openBlockMenuFromContextMenu,
   onEditorMouseMove,
   onEditorMouseUp,
+  openBlockMenuFromSelection,
   onDragHandleNodeChange,
 } = useBlockMenu(editor, { readOnly: () => props.readOnly })
 
@@ -313,9 +314,13 @@ watch(
   { immediate: true },
 )
 
-// Redirect Ctrl/Cmd+A (see onMounted) into the editor's own selectAll.
+// Redirect Ctrl/Cmd+A (see onMounted) into the editor's own selectAll, then
+// pop the same block menu a mouse drag-selection would (docSelectAllToEditor
+// only preventDefault()s when it actually redirected the selection, so that
+// flags whether this keypress was the one we care about).
 function onDocKeydown(e: KeyboardEvent) {
   docSelectAllToEditor(e, editor.value)
+  if (e.defaultPrevented) openBlockMenuFromSelection()
 }
 
 // Click a comment highlight → open that thread in the sidebar.

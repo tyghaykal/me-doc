@@ -232,3 +232,10 @@
 {"type":"edit","file":"/home/haykal/Code/me-doc/backend/migrations/0016_google_auth.sql","success":true,"timestamp":1785904760328,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/backend/migrations/0016_google_auth.sql","success":true,"timestamp":1785904770382,"sessionId":null}
 {"type":"edit","file":"/home/haykal/Code/me-doc/backend/src/auth/google.rs","success":true,"timestamp":1785937628468,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785947844826,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785947851589,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785947868250,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785948057529,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785948070048,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785948084956,"sessionId":null}
+{"type":"edit","file":"/home/haykal/Code/me-doc/frontend/app/components/BlockMenu.vue","success":true,"timestamp":1785948102116,"sessionId":null}
