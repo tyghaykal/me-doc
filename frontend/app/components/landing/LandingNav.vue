@@ -2,11 +2,12 @@
 const { isDark, toggleTheme } = useTheme()
 const authStore = useAuthStore()
 const authReady = useAuthReady()
+const { public: { productName } } = useRuntimeConfig()
 </script>
 
 <template>
   <nav class="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
-    <NuxtLink to="/" class="text-lg font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">me-doc</NuxtLink>
+    <NuxtLink to="/" class="text-lg font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">{{ productName }}</NuxtLink>
 
     <div class="flex items-center gap-2">
       <button

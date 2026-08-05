@@ -2,6 +2,14 @@ import { defineStore } from 'pinia'
 
 export const DEFAULT_PAGE_ICON = '📄'
 
+// Shared by Editor.vue's icon picker and local.vue's (offline documents get
+// the same picker so the two feel like the same product).
+export const PAGE_ICON_CHOICES = [
+  '📄', '📝', '📋', '📌', '📎', '📅', '✅', '⭐',
+  '🔥', '💡', '🚀', '🎯', '📊', '📁', '🔖', '💬',
+  '🧠', '🛠️', '🎨', '📚', '🧩', '🔒', '🌐', '❤️',
+]
+
 export interface Page {
   id: string
   workspace_id: string

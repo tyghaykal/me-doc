@@ -90,6 +90,14 @@ async function logout() {
         >
           Update information
         </button>
+        <NuxtLink
+          to="/app/settings"
+          role="menuitem"
+          class="block w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          @click="open = false"
+        >
+          AI settings
+        </NuxtLink>
         <button
           type="button"
           role="menuitem"

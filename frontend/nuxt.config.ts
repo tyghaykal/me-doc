@@ -1,5 +1,9 @@
 import tailwindcss from '@tailwindcss/vite'
 
+// White-label name — operators override via NUXT_PUBLIC_PRODUCT_NAME (build-time,
+// baked into the title below) and PRODUCT_NAME on the backend (see config.rs).
+const productName = process.env.NUXT_PUBLIC_PRODUCT_NAME || 'MeDoc'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -12,7 +16,7 @@ export default defineNuxtConfig({
       // The only case needing client JS is "user previously chose light" —
       // remove the class before paint (blocking script, default head position).
       htmlAttrs: { class: 'dark' },
-      title: 'MeDoc — Write together, live!',
+      title: `${productName} — Write together, live!`,
       titleTemplate: '%s',
       meta: [
         { name: 'description', content: 'Real-time collaborative notes and docs for your team.' },
@@ -46,6 +50,7 @@ export default defineNuxtConfig({
       // Browser-reachable MinIO bucket base for reading uploaded attachments (public download).
       // The backend signs against the internal docker host (minio:9000); this is the host mapping.
       minioBase: process.env.NUXT_PUBLIC_MINIO_BASE || 'http://localhost:9010/medoc',
+      productName,
     },
   },
 })

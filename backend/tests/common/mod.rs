@@ -116,7 +116,13 @@ pub async fn grant_page_link(pool: &PgPool, page_id: Uuid, link_token: &str, rol
 pub async fn test_state(pool: PgPool) -> AppState {
     let config = Config::from_env().expect("test env must carry the backend's env vars");
     let redis = RedisClient::open(config.redis_url.clone()).unwrap();
-    let email = EmailClient::new(&config.smtp_host, config.smtp_port, &config.smtp_from).unwrap();
+    let email = EmailClient::new(
+        &config.smtp_host,
+        config.smtp_port,
+        &config.smtp_from,
+        &config.product_name,
+    )
+    .unwrap();
     let s3 = storage::build_client(&config);
     let s3_presign = storage::build_presign_client(&config);
 

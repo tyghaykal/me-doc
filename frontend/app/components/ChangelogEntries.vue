@@ -4,6 +4,26 @@ const releases = [
     version: 'v0.2.0-alpha',
     entries: [
       {
+        title: 'AI writing assistant (BYOK)',
+        detail: 'Rephrase, fix grammar, reformat, proofread, or explain any selection — powered by your own OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, local Ollama). Configure URL, key, and model once in Settings; keys are encrypted at rest and never leave your server.',
+      },
+      {
+        title: 'Offline / local documents',
+        detail: 'Create and edit documents straight on your filesystem — no server page, no upload. Autosaves as plain Markdown (or HTML), with a Local section in the sidebar to reopen recent files. Nothing is shared or uploaded.',
+      },
+      {
+        title: 'Notion-style title & body navigation',
+        detail: 'Arrow keys move the caret between the title and the first line, and backspacing on an empty title with a body promotes the first line into it — select-all (Ctrl/Cmd+A) also stays scoped to the document.',
+      },
+      {
+        title: 'Block menu & drag handle everywhere',
+        detail: 'The line drag-handle and mark-text menu (formatting, colors, AI) now work in local documents too, with comments still reserved for shared pages.',
+      },
+      {
+        title: 'White-label product name',
+        detail: 'The product name is now a deploy-time setting (PRODUCT_NAME), shown in the browser tab, landing page, and emails — no more hardcoded branding.',
+      },
+      {
         title: 'Document import',
         detail: 'Bring in existing files and have them converted to editable pages — Word, PDF, Excel, PowerPoint, EPUB, HTML, and CSV, alongside plain text and Markdown.',
       },
@@ -14,6 +34,14 @@ const releases = [
       {
         title: 'Diagram viewer polish',
         detail: 'Diagrams auto-fit the canvas on open, plus a fullscreen toggle for working on larger flowcharts.',
+      },
+      {
+        title: 'Automated database backups',
+        detail: 'A scheduled backup job dumps Postgres, compresses it, and stores it in your backup bucket daily — with optional retention-based pruning.',
+      },
+      {
+        title: 'End-to-end test suite',
+        detail: 'A Playwright suite covering auth, collaboration, comments, imports, exports, settings, and local documents runs against the real stack.',
       },
     ],
   },

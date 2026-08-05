@@ -2,6 +2,7 @@
 //! a thin binary that wires these into the actual `axum::serve` call; `tests/`
 //! (a separate crate) imports this same lib to reach internal logic like
 //! `sharing::resolve_role`.
+pub mod ai;
 pub mod auth;
 pub mod collab;
 pub mod comments;
@@ -59,6 +60,7 @@ pub fn build_app_with_sensitive(sensitive: Router<AppState>, state: AppState) ->
         .nest("/workspaces", workspaces::router())
         .merge(pages::router())
         .merge(convert::router())
+        .merge(ai::router())
         .merge(sharing::router())
         .merge(collab::router())
         .merge(export::router())

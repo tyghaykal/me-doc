@@ -7,8 +7,8 @@ const props = defineProps<{
   node: any
   x: number
   y: number
-  pageId: string
-  workspaceId: string
+  pageId?: string
+  workspaceId?: string
   selectionRange?: { from: number; to: number } | null
 }>()
 
@@ -16,6 +16,66 @@ const emit = defineEmits<{ close: [] }>()
 
 const api = useApi()
 const commentsStore = useCommentsStore()
+
+// The menu's full-screen Teleport backdrop sits at <body>, so it is a sibling
+// of the editor's scrollable container, not a descendant — wheel events over
+// it never bubble into that container and the page appears frozen while the
+// menu is open. Find the nearest scrollable ancestor of the editor's DOM and
+// forward wheel events to it (scrollTarget=0 since the wheel already carries
+// the current delta).
+const editorEl = computed(() => props.editor?.view?.dom as HTMLElement | undefined)
+function findScrollParent(el: HTMLElement | null | undefined): HTMLElement | undefined {
+  let cur = el?.parentElement
+  while (cur) {
+    if (cur.scrollHeight > cur.clientHeight) return cur
+    cur = cur.parentElement
+  }
+  return undefined
+}
+const scrollParent = computed(() => findScrollParent(editorEl.value))
+
+// Clamp the menu inside the viewport once its real size is known. The initial
+// y comes from coordsAtPos(selection.to).bottom, which lands near the bottom
+// edge when the marked text runs off the screen — without this the menu opens
+// half-invisible under the fold.
+//
+// offsetHeight is NOT reactive, so the height is tracked through a
+// ResizeObserver instead: the menu grows when the AI panel (or comment draft)
+// opens, and the clamp must re-evaluate with the taller size or the lower
+// options end up below the viewport.
+const menuEl = ref<HTMLElement | null>(null)
+const menuHeight = ref(0)
+let menuResizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  const el = menuEl.value
+  if (!el) return
+  menuHeight.value = el.offsetHeight
+  menuResizeObserver = new ResizeObserver(([entry]) => {
+    menuHeight.value = entry.contentRect.height
+  })
+  menuResizeObserver.observe(el)
+})
+onBeforeUnmount(() => menuResizeObserver?.disconnect())
+
+const clampedY = computed(() => {
+  if (!menuHeight.value) return props.y
+  const MENU_MARGIN = 8
+  const menuH = menuHeight.value
+  const viewportH = window.innerHeight
+  if (props.y + menuH > viewportH - MENU_MARGIN) {
+    return Math.max(MENU_MARGIN, props.y - menuH - 12)
+  }
+  return props.y
+})
+const clampedX = computed(() => {
+  if (!menuEl.value) return props.x
+  const MENU_MARGIN = 8
+  const menuW = menuEl.value.offsetWidth
+  if (props.x + menuW > window.innerWidth - MENU_MARGIN) {
+    return Math.max(MENU_MARGIN, window.innerWidth - menuW - MENU_MARGIN)
+  }
+  return props.x
+})
 
 const textColors = [
   { name: 'Default', value: null },
@@ -53,6 +113,25 @@ function blockRange() {
 function contentRange() {
   if (props.selectionRange) return props.selectionRange
   return { from: props.pos + 1, to: props.pos + props.node.nodeSize - 1 }
+}
+
+// Range covering every block a marked selection touches. blockRange() only
+// covers the single hovered block under the pointer, so replacing a multi-line
+// mark with it would rewrite just one line. $from.blockRange($to) resolves the
+// deepest common block ancestor of the selection's endpoints — for a mark
+// spanning several paragraphs that's the span from the first block's start to
+// the last block's end (a selection ending exactly on a block boundary is
+// handled natively, not inflated into the untouched next block); for a
+// partial in-block mark it stays the marked text range, so a block-shaped AI
+// reply splits that paragraph rather than nuking the whole line. Falls back to
+// the hovered block when there's no selection.
+function selectionBlockRange() {
+  if (!props.selectionRange) return blockRange()
+  const doc = props.editor.state.doc
+  const r = doc
+    .resolve(props.selectionRange.from)
+    .blockRange(doc.resolve(props.selectionRange.to))
+  return r ? { from: r.$from.pos, to: r.$to.pos } : blockRange()
 }
 
 function duplicate() {
@@ -96,6 +175,128 @@ function toggleMark(mark: 'bold' | 'italic' | 'strike' | 'code') {
 
 function isMarkActive(mark: string): boolean {
   return props.editor.isActive(mark)
+}
+
+// --- AI (BYOK) ---
+// Same range this menu already uses for colors/formatting: the marked
+// selection when opened by dragging over text, otherwise the whole hovered
+// block — so "mark some text" and "click the line block button" both land
+// here with the right scope for free.
+const AI_ACTIONS = [
+  { instruction: 'rephrase', label: 'Rephrase', hint: 'Reword, keeping its meaning' },
+  { instruction: 'fix_grammar', label: 'Fix grammar', hint: 'Correct grammar and spelling' },
+  { instruction: 'reformat', label: 'Reformat', hint: 'Restructure for clarity' },
+  { instruction: 'proofread', label: 'Proofread', hint: 'Fix grammar, spelling and clarity' },
+  { instruction: 'explain', label: 'Explain', hint: 'Add an explanation below' },
+]
+const aiPanelOpen = ref(false)
+const aiLoading = ref(false)
+const aiError = ref<{ message: string; settingsLink: boolean } | null>(null)
+const aiStatus = useAiStatus()
+
+function openAiPanel() {
+  aiError.value = null
+  aiPanelOpen.value = true
+}
+
+/** Renders the AI's markdown reply through the same converter the app's
+ *  `.md` import uses, so `**bold**`, lists, code blocks, etc. come out as
+ *  real editor nodes instead of literal syntax. AI prose uses the soft-break
+ *  mode (`breaks: false`) so a single newline stays whitespace instead of
+ *  becoming a hard <br> that re-serializes as `  \n`. */
+function aiResultHtml(text: string): string {
+  return markdownToHtml(text, { breaks: false }).trim()
+}
+
+// A rendered block element a text-selection replacement can't host inline.
+const BLOCK_TAG = /^<(p|ul|ol|li|pre|blockquote|h[1-6]|hr|table)[\s>]/i
+
+/** Replace (or append to) the current range with markdown-rendered AI output.
+ *  Whole-block scoping replaces the full node so multi-block markdown renders
+ *  as real blocks; a marked selection replaces just that text, inline — unless
+ *  the result is block-shaped, in which case the whole selection's blocks are
+ *  replaced so a list/heading/code reply doesn't get wedged into a paragraph
+ *  and doesn't leave un-replaced lines from a multi-line mark. */
+function insertAiResult(text: string, append: boolean) {
+  const html = aiResultHtml(text)
+  const inline = !!props.selectionRange && !BLOCK_TAG.test(html)
+  const pos = append ? blockRange().to : inline ? contentRange() : selectionBlockRange()
+  const content = inline ? html.replace(/^<p>([\s\S]*)<\/p>$/, '$1') : html
+  props.editor.chain().focus().insertContentAt(pos, content).run()
+}
+
+type AiResult = { result: string; usage: { prompt: number; completion: number; total: number } | null }
+
+// Shared error handling: surface in the popup and in the global toast so a
+// dismissed menu doesn't swallow the failure.
+function reportAiError(err: any) {
+  const message = err?.data?.message
+  const popup =
+    message === 'no AI settings configured'
+      ? { message: 'Set up your AI provider to use this.', settingsLink: true }
+      : { message: message ?? 'The AI request failed.', settingsLink: false }
+  aiError.value = popup
+  aiStatus.fail(popup.message)
+}
+
+async function runAiAction(instruction: string) {
+  const range = contentRange()
+  const text = props.editor.state.doc.textBetween(range.from, range.to, '\n').trim()
+  if (!text) {
+    aiError.value = { message: 'There is no text here yet.', settingsLink: false }
+    return
+  }
+
+  aiLoading.value = true
+  aiError.value = null
+  aiStatus.start('Running AI…')
+  let data: AiResult
+  try {
+    data = await api<AiResult>('/ai/complete', { method: 'POST', body: { instruction, text } })
+  } catch (err: any) {
+    aiLoading.value = false
+    reportAiError(err)
+    return
+  }
+  aiLoading.value = false
+
+  insertAiResult(data.result, instruction === 'explain')
+  aiStatus.succeed('AI result applied', data.usage ?? null)
+  emit('close')
+}
+
+// --- AI custom request (chat) ---
+// The user's own prompt, optionally acting on the currently selected text —
+// the selected text is appended as context so "make this more formal" works
+// on a marked range without the user re-typing it. Replies append below the
+// block, markdown-rendered, since a conversation shouldn't replace the
+// selection it was prompted from.
+const chatPrompt = ref('')
+
+async function runAiChat() {
+  const prompt = chatPrompt.value.trim()
+  if (!prompt) return
+
+  aiLoading.value = true
+  aiError.value = null
+  aiStatus.start('Running AI…')
+  const range = contentRange()
+  const selectedText = props.editor.state.doc.textBetween(range.from, range.to, '\n').trim()
+  const text = selectedText ? `${prompt}\n\nSelected text:\n${selectedText}` : prompt
+  let data: AiResult
+  try {
+    data = await api<AiResult>('/ai/complete', { method: 'POST', body: { instruction: 'chat', text } })
+  } catch (err: any) {
+    aiLoading.value = false
+    reportAiError(err)
+    return
+  }
+  aiLoading.value = false
+
+  chatPrompt.value = ''
+  insertAiResult(data.result, true)
+  aiStatus.succeed('AI reply added', data.usage ?? null)
+  emit('close')
 }
 
 // --- Comment ---
@@ -165,14 +366,27 @@ async function submitComment() {
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-40" @click="emit('close')" @contextmenu.prevent="emit('close')" />
+    <div class="fixed inset-0 z-40" @click="emit('close')" @contextmenu.prevent="emit('close')" @wheel.passive="scrollParent?.scrollBy(0, $event.deltaY)" />
     <div
+      ref="menuEl"
       role="menu"
-      class="fixed z-50 w-64 rounded-md border border-neutral-200 bg-white py-2 text-sm shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-      :style="{ left: `${x}px`, top: `${y}px` }"
+      class="fixed z-50 w-64 overflow-y-auto rounded-md border border-neutral-200 bg-white py-2 text-sm shadow-lg thin-scrollbar dark:border-neutral-700 dark:bg-neutral-900"
+      :style="{ left: `${clampedX}px`, top: `${clampedY}px`, maxHeight: `calc(100vh - ${2 * 8}px)` }"
     >
-      <template v-if="!commentDraftOpen">
+      <template v-if="!commentDraftOpen && !aiPanelOpen">
         <div class="flex items-center gap-1 px-2 pb-2">
+          <button
+            type="button"
+            title="Ask AI"
+            aria-label="Ask AI"
+            class="rounded p-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            @click="openAiPanel"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+              <path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" />
+              <path d="M19 15v4M17 17h4" />
+            </svg>
+          </button>
           <button
             type="button"
             title="Duplicate"
@@ -209,6 +423,7 @@ async function submitComment() {
             </svg>
           </button>
           <button
+            v-if="pageId && workspaceId"
             type="button"
             title="Comment"
             aria-label="Comment"
@@ -287,7 +502,7 @@ async function submitComment() {
         </div>
       </template>
 
-      <div v-else class="px-2">
+      <div v-else-if="commentDraftOpen" class="px-2">
         <textarea
           v-model="commentBody"
           rows="3"
@@ -335,6 +550,66 @@ async function submitComment() {
             @click="submitComment"
           >
             Comment
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="px-2">
+        <p class="px-1 pb-1.5 text-xs font-medium text-neutral-400 dark:text-neutral-500">
+          Ask AI — uses your own provider (<NuxtLink to="/app/settings" class="underline" @click="emit('close')">settings</NuxtLink>)
+        </p>
+
+        <div v-if="aiLoading" class="px-1 py-3 text-sm text-neutral-500 dark:text-neutral-400">
+          Thinking…
+        </div>
+
+        <template v-else>
+          <p v-if="aiError" class="mb-2 rounded bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+            {{ aiError.message }}
+            <NuxtLink v-if="aiError.settingsLink" to="/app/settings" class="underline" @click="emit('close')">
+              Open settings
+            </NuxtLink>
+          </p>
+
+          <div class="flex flex-col gap-1.5">
+            <textarea
+              v-model="chatPrompt"
+              rows="2"
+              placeholder="Ask anything…"
+              class="w-full resize-none rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+              @keydown.enter.exact.prevent="runAiChat"
+            />
+            <button
+              type="button"
+              :disabled="!chatPrompt.trim() || aiLoading"
+              class="self-end rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-neutral-950 dark:hover:bg-teal-400"
+              @click="runAiChat"
+            >
+              Ask
+            </button>
+          </div>
+
+          <div class="my-2 border-t border-neutral-200 dark:border-neutral-800" />
+
+          <button
+            v-for="action in AI_ACTIONS"
+            :key="action.instruction"
+            type="button"
+            class="block w-full rounded px-2 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            @click="runAiAction(action.instruction)"
+          >
+            <span class="block text-neutral-900 dark:text-neutral-100">{{ action.label }}</span>
+            <span class="block text-xs text-neutral-500 dark:text-neutral-400">{{ action.hint }}</span>
+          </button>
+        </template>
+
+        <div class="mt-1 flex justify-end pb-1">
+          <button
+            type="button"
+            class="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            @click="aiPanelOpen = false"
+          >
+            Back
           </button>
         </div>
       </div>

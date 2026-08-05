@@ -10,7 +10,7 @@ const authReady = useAuthReady()
     </h1>
     <p class="animate-fade-up mx-auto mt-6 max-w-2xl text-lg text-neutral-600 dark:text-neutral-400 [animation-delay:80ms]">
       Write together in real time, organize pages your way, share exactly what you mean to,
-      and export whenever you need to take it elsewhere.
+      and export whenever you need to take it elsewhere — or work entirely on your own files, with AI help along the way.
     </p>
 
     <div class="animate-fade-up mt-10 flex items-center justify-center gap-4 [animation-delay:160ms]">

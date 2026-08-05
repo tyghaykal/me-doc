@@ -93,9 +93,22 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </div>
 
       <SidebarSharedSection />
+
+      <SidebarLocalDocs />
     </div>
 
     <div class="mt-auto flex flex-col gap-1 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+      <NuxtLink
+        to="/app/local"
+        class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        title="Edit a document stored on this device only — never uploaded or shared"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+          <path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+        Local documents
+      </NuxtLink>
+
       <button
         type="button"
         class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"

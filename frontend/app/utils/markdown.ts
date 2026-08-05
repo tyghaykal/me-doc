@@ -9,10 +9,18 @@ import markedFootnote from 'marked-footnote'
 // re-running `.use()` on the same long-lived object and piling up
 // duplicate/stale registrations. A fresh instance per module evaluation
 // sidesteps that entirely.
+//
+// Two instances differ only in `breaks`: prose documents (`.md` imports,
+// local files) treat a single newline as a hard line break; AI-generated
+// prose instead treats it as soft whitespace so a multi-line reply doesn't
+// come back littered with <br> / `  \n` hard breaks.
 const marked = new Marked()
+const markedSoft = new Marked()
 
 marked.setOptions({ breaks: true })
+markedSoft.setOptions({ breaks: false })
 marked.use(markedFootnote())
+markedSoft.use(markedFootnote())
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -224,6 +232,7 @@ marked.use({
   },
 })
 
-export function markdownToHtml(text: string): string {
-  return marked.parse(extractAbbreviations(text), { async: false })
+export function markdownToHtml(text: string, opts?: { breaks?: boolean }): string {
+  const m = opts?.breaks === false ? markedSoft : marked
+  return m.parse(extractAbbreviations(text), { async: false })
 }

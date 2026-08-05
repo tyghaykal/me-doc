@@ -160,17 +160,22 @@ function buildCommands(opts: SlashCommandOptions): SlashCommandItem[] {
           .insertContent({ type: 'diagram', attrs: { source: DEFAULT_DIAGRAM_SOURCE } })
           .run(),
     },
-    {
-      title: 'Embed diagram',
-      description: 'Insert a live copy of an existing diagram.',
-      group: 'Media',
-      icon: '⧉',
-      keywords: 'embed diagram chart link reference',
-      command: ({ editor, range }) => {
-        editor.chain().focus().deleteRange(range).run()
-        onEmbedDiagram()
-      },
-    },
+    // Only meaningful with a server workspace to pick an existing diagram from.
+    ...(onEmbedDiagram
+      ? [
+          {
+            title: 'Embed diagram',
+            description: 'Insert a live copy of an existing diagram.',
+            group: 'Media',
+            icon: '⧉',
+            keywords: 'embed diagram chart link reference',
+            command: ({ editor, range }: { editor: any; range: any }) => {
+              editor.chain().focus().deleteRange(range).run()
+              onEmbedDiagram()
+            },
+          },
+        ]
+      : []),
   ]
 }
 
@@ -202,7 +207,7 @@ function positionPopup(popup: HTMLElement, clientRect: (() => DOMRect | null) | 
 
 export interface SlashCommandOptions {
   onInsertImage: () => void
-  onEmbedDiagram: () => void
+  onEmbedDiagram?: () => void
 }
 
 export const SlashCommand = Extension.create<SlashCommandOptions>({
@@ -211,7 +216,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
   addOptions() {
     return {
       onInsertImage: () => {},
-      onEmbedDiagram: () => {},
+      onEmbedDiagram: undefined,
     }
   },
 

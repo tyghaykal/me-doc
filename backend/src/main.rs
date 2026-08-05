@@ -22,7 +22,12 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(&db).await?;
 
     let redis = RedisClient::open(config.redis_url.clone())?;
-    let email = EmailClient::new(&config.smtp_host, config.smtp_port, &config.smtp_from)?;
+    let email = EmailClient::new(
+        &config.smtp_host,
+        config.smtp_port,
+        &config.smtp_from,
+        &config.product_name,
+    )?;
     let s3 = storage::build_client(&config);
     let s3_presign = storage::build_presign_client(&config);
 

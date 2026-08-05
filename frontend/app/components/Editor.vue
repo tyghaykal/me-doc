@@ -1,30 +1,14 @@
 <script setup lang="ts">
 import * as Y from 'yjs'
-import { NodeSelection } from '@tiptap/pm/state'
 import { WebsocketProvider } from 'y-websocket'
 import { EditorContent, useEditor, type Editor } from '@tiptap/vue-3'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
 import { DragHandle } from '@tiptap/extension-drag-handle-vue-3'
-import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
-import { TextStyle } from '@tiptap/extension-text-style'
-import Color from '@tiptap/extension-color'
-import Highlight from '@tiptap/extension-highlight'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
 import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
-import { TableKit } from '@tiptap/extension-table'
-import Subscript from '@tiptap/extension-subscript'
-import Superscript from '@tiptap/extension-superscript'
-import { SlashCommand } from './slash-command'
-import { CommentMark } from './comment-mark'
-import { DefinitionList, DefinitionTerm, DefinitionDescription } from './definition-list'
-import { AbbrMark } from './abbr-mark'
-import { ContainerNode } from './container-node'
-import { DiagramNode } from './diagram-node'
-import { DiagramEmbed } from './diagram-embed'
-import { DEFAULT_PAGE_ICON } from '~/stores/pages'
+import { useBlockMenu } from '~/composables/useBlockMenu'
+import { DEFAULT_PAGE_ICON, PAGE_ICON_CHOICES } from '~/stores/pages'
+import { bodyArrowUpToTitle, bodyBackspaceToTitle, docSelectAllToEditor, titleKeydown } from '~/utils/title'
 
 const props = defineProps<{
   pageId: string
@@ -50,6 +34,7 @@ const doc = new Y.Doc()
 
 // --- Title ---
 const titleDraft = ref(props.title)
+const titleInput = ref<HTMLInputElement | null>(null)
 watch(
   () => props.title,
   (t) => {
@@ -60,18 +45,13 @@ let titleTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleTitleSave() {
   clearTimeout(titleTimer)
   titleTimer = setTimeout(() => {
-    pagesStore.updatePage(props.pageId, { title: titleDraft.value || 'Untitled' }, props.linkToken)
+    pagesStore.updatePage(props.pageId, { title: titleDraft.value }, props.linkToken)
   }, 800)
 }
 
 // --- Icon ---
 const iconDraft = ref(props.icon ?? '')
 const iconPickerOpen = ref(false)
-const EMOJI_CHOICES = [
-  '📄', '📝', '📋', '📌', '📎', '📅', '✅', '⭐',
-  '🔥', '💡', '🚀', '🎯', '📊', '📁', '🔖', '💬',
-  '🧠', '🛠️', '🎨', '📚', '🧩', '🔒', '🌐', '❤️',
-]
 watch(
   () => props.icon,
   (i) => {
@@ -179,145 +159,6 @@ function insertDiagramEmbed(diagram: { id: string; title: string }) {
     .run()
 }
 
-// --- Drag handle / block menu ---
-const hoveredBlock = ref<{ node: any; pos: number } | null>(null)
-const blockMenu = ref<{
-  x: number
-  y: number
-  node: any
-  pos: number
-  selectionRange?: { from: number; to: number }
-} | null>(null)
-
-// The drag-handle extension reports "no node" as soon as the pointer's exact
-// x,y stops resolving to the block's own DOM (e.g. drifting into the left
-// gutter to reach the grip, or past a short line's text into empty space on
-// the same row) — track the real pointer position and only actually clear
-// the hovered block once it's left that block's vertical row, not just its
-// horizontal bounds.
-const lastPointerY = ref(0)
-function onEditorMouseMove(e: MouseEvent) {
-  lastPointerY.value = e.clientY
-}
-
-function onDragHandleNodeChange(data: { node: any; pos: number }) {
-  if (data.node) {
-    hoveredBlock.value = { node: data.node, pos: data.pos }
-    updateHandleBoxHeight(data.pos)
-    return
-  }
-  if (hoveredBlock.value && editor.value) {
-    const dom = editor.value.view.nodeDOM(hoveredBlock.value.pos)
-    if (dom instanceof HTMLElement) {
-      const rect = dom.getBoundingClientRect()
-      if (lastPointerY.value >= rect.top && lastPointerY.value <= rect.bottom) return
-    }
-  }
-  hoveredBlock.value = null
-}
-
-// The +/⠿ buttons were a hardcoded h-[1.75rem] matching only the base
-// paragraph's leading-7 — any block with a different line-height (e.g. code
-// blocks at line-height:1.6/0.875rem in main.css, ~1.4rem) then centers
-// against the wrong box height and visibly drifts off the text line.
-// Read the hovered block's own computed line-height instead.
-const handleBoxHeight = ref('1.75rem')
-function updateHandleBoxHeight(pos: number) {
-  const dom = editor.value?.view.nodeDOM(pos)
-  if (!(dom instanceof HTMLElement)) return
-  const lineHeight = getComputedStyle(dom).lineHeight
-  handleBoxHeight.value = lineHeight && lineHeight !== 'normal' ? lineHeight : '1.75rem'
-}
-
-// No offset middleware here on purpose: the handle's wrapper element is
-// appended as a sibling of the ProseMirror content with pointer-events:none
-// (set by @tiptap/extension-drag-handle itself), and the library's own
-// mouseleave guard hides the handle whenever the cursor's relatedTarget
-// lands outside both the content and the handle. A horizontal gap here
-// becomes a dead zone the mouse must cross, so it never resolves to either
-// element and the handle hides before the click lands. Any left-gutter
-// spacing has to come from the button's own padding/margin instead, not
-// from moving the floating box away from the block edge.
-const dragHandlePositionConfig = {
-  placement: 'left-start' as const,
-  strategy: 'absolute' as const,
-  middleware: [],
-}
-
-// @tiptap/extension-drag-handle hides its floating box via visibility/
-// pointer-events the instant the mouse leaves the ProseMirror content
-// element — including into our own left gutter, since its wrapper sits
-// outside that gutter and its mouseleave guard only checks
-// `wrapper.contains(relatedTarget)`. hoveredBlock above already tracks
-// "pointer is still over this block's row" correctly; visibility and
-// pointer-events both inherit down the DOM, so re-declaring them here on
-// our own element overrides the library's inline styles on its ancestor
-// with zero specificity fight, keeping the buttons visible and clickable
-// while hovered.
-const handleBoxStyle = computed(() => ({
-  height: handleBoxHeight.value,
-  visibility: hoveredBlock.value ? ('visible' as const) : undefined,
-  pointerEvents: hoveredBlock.value ? ('auto' as const) : undefined,
-}))
-
-function insertBlockBelow() {
-  if (!hoveredBlock.value || !editor.value) return
-  const { pos, node } = hoveredBlock.value
-  const insertPos = pos + node.nodeSize
-  editor.value
-    .chain()
-    .focus()
-    .insertContentAt(insertPos, { type: 'paragraph' })
-    .setTextSelection(insertPos + 1)
-    .run()
-}
-
-function openBlockMenu(x: number, y: number, selectionRange?: { from: number; to: number }) {
-  if (!hoveredBlock.value || !editor.value) return
-  const { node, pos } = hoveredBlock.value
-  // Only collapse to a whole-block NodeSelection when there's no specific
-  // text range to preserve — a marked selection keeps its own highlight.
-  if (!selectionRange) editor.value.chain().focus().setNodeSelection(pos).run()
-  blockMenu.value = { x, y, node, pos, selectionRange }
-}
-
-function openBlockMenuFromGrip(e: MouseEvent) {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const MENU_WIDTH = 256 // matches BlockMenu.vue's w-64
-  openBlockMenu(Math.max(8, rect.left - MENU_WIDTH - 4), rect.top)
-}
-
-function activeTextSelection(): { from: number; to: number } | undefined {
-  if (!editor.value) return undefined
-  const { selection } = editor.value.state
-  // A single click on an atom node (diagram, image, ...) resolves to a
-  // NodeSelection, which is also non-empty — without this check it looked
-  // identical to a drag-selected text range and popped the same menu a
-  // right-click would (comment option included).
-  if (selection.empty || selection instanceof NodeSelection || editor.value.isActive('table')) return undefined
-  return { from: selection.from, to: selection.to }
-}
-
-// Right-click anywhere in the editor opens the same consolidated menu
-// (styling + comment + duplicate/delete) — falls through to the browser's
-// native context menu when no block is currently tracked as hovered.
-function openBlockMenuFromContextMenu(e: MouseEvent) {
-  if (!hoveredBlock.value) return
-  e.preventDefault()
-  openBlockMenu(e.clientX, e.clientY, activeTextSelection())
-}
-
-// Marking (dragging to select) text shows the same menu automatically once
-// the drag finishes — checked on mouseup rather than every selection change
-// so it doesn't pop up mid-drag and fight the selection gesture.
-function onEditorMouseUp() {
-  if (!editor.value || props.readOnly) return
-  const selectionRange = activeTextSelection()
-  if (!selectionRange) return
-  const coords = editor.value.view.coordsAtPos(selectionRange.to)
-  openBlockMenu(coords.left, coords.bottom + 6, selectionRange)
-}
-
 // useEditor() registers Vue lifecycle hooks (onMounted/onBeforeUnmount)
 // internally, so it must be called directly in setup — not inside our own
 // onMounted (a running onMounted callback has no active component instance
@@ -359,27 +200,15 @@ provider.awareness.on('change', updatePresence)
 const editor = useEditor({
   editable: !props.readOnly,
   extensions: [
-    StarterKit.configure({ undoRedo: false }),
-    Image.configure({ resize: { enabled: true, minWidth: 80, minHeight: 80 } }),
-    TextStyle,
-    Color,
-    Highlight.configure({ multicolor: true }),
-    TaskList,
-    TaskItem.configure({ nested: true }),
+    // Yjs owns the undo stack here, so StarterKit's own history is off.
+    ...useEditorExtensions({
+      undoRedo: false,
+      onInsertImage: triggerImagePicker,
+      onEmbedDiagram: openDiagramPicker,
+      comments: true,
+    }),
     Collaboration.configure({ document: doc }),
     CollaborationCaret.configure({ provider, user: currentUser }),
-    TableKit.configure({ table: { resizable: true } }),
-    Subscript,
-    Superscript,
-    DefinitionList,
-    DefinitionTerm,
-    DefinitionDescription,
-    AbbrMark,
-    ContainerNode,
-    DiagramNode,
-    DiagramEmbed,
-    CommentMark,
-    SlashCommand.configure({ onInsertImage: triggerImagePicker, onEmbedDiagram: openDiagramPicker }),
   ],
   editorProps: {
     // pl-12 lives here (on .ProseMirror itself), not on the wrapper div below,
@@ -419,9 +248,40 @@ const editor = useEditor({
       insertImages(files)
       return true
     },
+    handleKeyDown(_view, event) {
+      // Arrow Up at the very first line moves the caret into the title input.
+      if (bodyArrowUpToTitle(event, { editor: editor.value, input: titleInput.value })) return true
+      // Backspace at the very start of an empty-titled doc promotes the first
+      // line into the title. Returns true so ProseMirror drops the keypress.
+      return bodyBackspaceToTitle(event, {
+        editor: editor.value,
+        title: titleDraft.value,
+        onTitle: (t) => {
+          titleDraft.value = t
+          scheduleTitleSave()
+        },
+      })
+    },
   },
   onUpdate: scheduleSave,
 })
+
+// Gutter drag-handle + right-click/selection block menu — shared with the
+// offline LocalEditor.vue via useBlockMenu (see that file for the comments
+// explaining the handle geometry/hover quirks). Must run after `editor` above,
+// which it closes over.
+const {
+  hoveredBlock,
+  blockMenu,
+  handleBoxStyle,
+  dragHandlePositionConfig,
+  insertBlockBelow,
+  openBlockMenuFromGrip,
+  openBlockMenuFromContextMenu,
+  onEditorMouseMove,
+  onEditorMouseUp,
+  onDragHandleNodeChange,
+} = useBlockMenu(editor, { readOnly: () => props.readOnly })
 
 // Parent (page shell) mounts the right-side TOC from this instance.
 watch(
@@ -429,6 +289,11 @@ watch(
   (e) => emit('editor-ready', e ?? null),
   { immediate: true },
 )
+
+// Redirect Ctrl/Cmd+A (see onMounted) into the editor's own selectAll.
+function onDocKeydown(e: KeyboardEvent) {
+  docSelectAllToEditor(e, editor.value)
+}
 
 // Click a comment highlight → open that thread in the sidebar.
 function onEditorClick(e: MouseEvent) {
@@ -440,6 +305,13 @@ function onEditorClick(e: MouseEvent) {
 }
 
 onMounted(() => {
+  // Ctrl/Cmd+A with focus on the page shell (buttons, links, or nothing) would
+  // let the browser select every text node — sidebar and topbar included.
+  // Route it to the editor's own selectAll so only the document body is
+  // selected; focus on the title input or the contenteditable keeps native
+  // behavior (the title input's @keydown handles its own select).
+  document.addEventListener('keydown', onDocKeydown)
+
   // Loaded async and merged into the already-live doc rather than blocking
   // editor creation on it; Yjs updates are commutative, so ordering
   // relative to the websocket provider's own sync doesn't matter.
@@ -460,6 +332,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(titleTimer)
+  document.removeEventListener('keydown', onDocKeydown)
   provider.awareness.off('change', updatePresence)
   provider.destroy()
   doc.destroy()
@@ -483,7 +356,7 @@ onBeforeUnmount(() => {
         <div class="fixed inset-0 z-40" @click="iconPickerOpen = false" />
         <div class="absolute left-0 z-50 mt-1 grid w-64 grid-cols-8 gap-1 rounded-md border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
           <button
-            v-for="e in EMOJI_CHOICES"
+            v-for="e in PAGE_ICON_CHOICES"
             :key="e"
             type="button"
             class="rounded p-1 text-xl hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -504,13 +377,15 @@ onBeforeUnmount(() => {
     </div>
 
     <input
+      ref="titleInput"
       v-model="titleDraft"
       type="text"
       placeholder="Untitled"
       :readonly="readOnly"
       class="mb-2 w-full border-none bg-transparent text-4xl font-bold text-neutral-900 outline-none placeholder:text-neutral-300 dark:text-neutral-100 dark:placeholder:text-neutral-700"
       @input="!readOnly && scheduleTitleSave()"
-      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft || 'Untitled' }, linkToken)"
+      @blur="!readOnly && pagesStore.updatePage(pageId, { title: titleDraft }, linkToken)"
+      @keydown="!readOnly && titleKeydown($event, { editor, input: titleInput, onTitle: (t) => { titleDraft = t; scheduleTitleSave() } })"
     />
 
     <input ref="imageInput" type="file" accept="image/*" class="hidden" @change="onImageInputChange" />

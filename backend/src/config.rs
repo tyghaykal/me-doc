@@ -23,11 +23,19 @@ pub struct Config {
     pub otp_ttl_seconds: i64,
     pub frontend_origin: String,
     pub converter_url: String,
+    /// White-label display name, used in emails and (via the frontend's own
+    /// env var) page titles. Defaults to "MeDoc" — never hardcode the name
+    /// elsewhere in the backend.
+    pub product_name: String,
     /// Off by default: enabling this sends every exported diagram's full
     /// source text to the public mermaid.ink service to render a PNG. An
     /// operator must opt in explicitly — it's not implied by just running
     /// the app.
     pub export_diagram_render_enabled: bool,
+    /// Raw 32 bytes (decoded from base64 `AI_ENCRYPTION_KEY`) used to seal each
+    /// user's BYOK provider API key at rest. Rotating it makes every stored key
+    /// undecryptable — users have to re-enter theirs.
+    pub ai_encryption_key: Vec<u8>,
 }
 
 /// Reads a required secret from the environment, rejecting both "unset" and
@@ -75,9 +83,24 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
             converter_url: env::var("CONVERTER_URL")
                 .unwrap_or_else(|_| "http://converter:8000".into()),
+            product_name: env::var("PRODUCT_NAME").unwrap_or_else(|_| "MeDoc".into()),
             export_diagram_render_enabled: env::var("EXPORT_DIAGRAM_RENDER_ENABLED")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            ai_encryption_key: ai_encryption_key()?,
         })
     }
+}
+
+fn ai_encryption_key() -> anyhow::Result<Vec<u8>> {
+    let raw = non_empty_env("AI_ENCRYPTION_KEY")?;
+    let key = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw.trim())
+        .map_err(|_| anyhow::anyhow!("AI_ENCRYPTION_KEY must be valid base64"))?;
+    if key.len() != 32 {
+        anyhow::bail!(
+            "AI_ENCRYPTION_KEY must decode to exactly 32 bytes, got {}",
+            key.len()
+        );
+    }
+    Ok(key)
 }

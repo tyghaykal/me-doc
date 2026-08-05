@@ -17,16 +17,18 @@ fn escape_html(s: &str) -> String {
 pub struct EmailClient {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: String,
+    product_name: String,
 }
 
 impl EmailClient {
-    pub fn new(host: &str, port: u16, from: &str) -> anyhow::Result<Self> {
+    pub fn new(host: &str, port: u16, from: &str, product_name: &str) -> anyhow::Result<Self> {
         let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
             .port(port)
             .build();
         Ok(Self {
             transport,
             from: from.to_string(),
+            product_name: product_name.to_string(),
         })
     }
 
@@ -36,12 +38,12 @@ impl EmailClient {
             "login" => "complete your login",
             _ => "continue",
         };
-        let subject = "Your me-doc verification code";
+        let subject = format!("Your {} verification code", self.product_name);
 
         let plain = format!(
             "Use this code to {action}: {code}\n\nThis code expires shortly and can only be used once.\nIf you didn't request this, you can ignore this email."
         );
-        let html = otp_html(action, code);
+        let html = otp_html(action, code, &self.product_name);
 
         let email = Message::builder()
             .from(self.from.parse()?)
@@ -65,19 +67,20 @@ impl EmailClient {
         page_url: &str,
         is_new_user: bool,
     ) -> anyhow::Result<()> {
-        let subject = format!("{inviter_email} shared \"{page_title}\" with you on me-doc");
+        let name = &self.product_name;
+        let subject = format!("{inviter_email} shared \"{page_title}\" with you on {name}");
 
         let (plain, html) = if is_new_user {
             (
                 format!(
-                    "{inviter_email} shared \"{page_title}\" with you on me-doc.\n\nCreate an account with this email address ({to}) and it'll be waiting for you:\n{page_url}"
+                    "{inviter_email} shared \"{page_title}\" with you on {name}.\n\nCreate an account with this email address ({to}) and it'll be waiting for you:\n{page_url}"
                 ),
-                share_html(inviter_email, page_title, page_url, "Sign up to view it — it'll be waiting for you"),
+                share_html(inviter_email, page_title, page_url, "Sign up to view it — it'll be waiting for you", name),
             )
         } else {
             (
-                format!("{inviter_email} shared \"{page_title}\" with you on me-doc.\n\nOpen it: {page_url}"),
-                share_html(inviter_email, page_title, page_url, "Open the page"),
+                format!("{inviter_email} shared \"{page_title}\" with you on {name}.\n\nOpen it: {page_url}"),
+                share_html(inviter_email, page_title, page_url, "Open the page", name),
             )
         };
 
@@ -94,9 +97,10 @@ impl EmailClient {
 
 /// Inline-styled so it renders consistently across email clients (most strip
 /// `<style>` blocks); mirrors the app's dark, indigo-accented look.
-fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str) -> String {
+fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str, product_name: &str) -> String {
     let inviter_email = escape_html(inviter_email);
     let page_title = escape_html(page_title);
+    let product_name = escape_html(product_name);
     let inviter_email = inviter_email.as_str();
     let page_title = page_title.as_str();
     format!(
@@ -109,7 +113,7 @@ fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str) 
           <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;">
             <tr>
               <td style="padding:32px 40px 8px;">
-                <span style="font-size:18px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em;">me-doc</span>
+                <span style="font-size:18px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em;">{product_name}</span>
               </td>
             </tr>
             <tr>
@@ -126,7 +130,7 @@ fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str) 
               </td>
             </tr>
           </table>
-          <p style="margin:20px 0 0;font-size:12px;color:#64748b;">&copy; {year} me-doc</p>
+          <p style="margin:20px 0 0;font-size:12px;color:#64748b;">&copy; {year} {product_name}</p>
         </td>
       </tr>
     </table>
@@ -136,11 +140,13 @@ fn share_html(inviter_email: &str, page_title: &str, page_url: &str, cta: &str) 
         page_title = page_title,
         page_url = page_url,
         cta = cta,
+        product_name = product_name,
         year = chrono::Utc::now().format("%Y"),
     )
 }
 
-fn otp_html(action: &str, code: &str) -> String {
+fn otp_html(action: &str, code: &str, product_name: &str) -> String {
+    let product_name = escape_html(product_name);
     format!(
         r#"<!doctype html>
 <html>
@@ -151,7 +157,7 @@ fn otp_html(action: &str, code: &str) -> String {
           <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;">
             <tr>
               <td style="padding:32px 40px 8px;">
-                <span style="font-size:18px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em;">me-doc</span>
+                <span style="font-size:18px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em;">{product_name}</span>
               </td>
             </tr>
             <tr>
@@ -176,7 +182,7 @@ fn otp_html(action: &str, code: &str) -> String {
               </td>
             </tr>
           </table>
-          <p style="margin:20px 0 0;font-size:12px;color:#64748b;">&copy; {year} me-doc</p>
+          <p style="margin:20px 0 0;font-size:12px;color:#64748b;">&copy; {year} {product_name}</p>
         </td>
       </tr>
     </table>
@@ -184,6 +190,7 @@ fn otp_html(action: &str, code: &str) -> String {
 </html>"#,
         action = action,
         code = code,
+        product_name = product_name,
         year = chrono::Utc::now().format("%Y"),
     )
 }
@@ -199,6 +206,7 @@ mod tests {
             "<img src=x onerror=alert(document.cookie)>",
             "https://example.com/app/page",
             "Open the page",
+            "me-doc",
         );
         assert!(!html.contains("<img src=x"));
         assert!(html.contains("&lt;img src=x onerror=alert(document.cookie)&gt;"));

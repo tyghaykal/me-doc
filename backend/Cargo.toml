@@ -24,6 +24,9 @@ jsonwebtoken = "9"
 rand = "0.8"
 sha2 = "0.10"
 base64 = "0.22"
+# Nothing else here does authenticated encryption; BYOK provider API keys are
+# stored encrypted at rest rather than plaintext (see src/ai/mod.rs).
+aes-gcm = "0.10"
 tower-cookies = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "smtp-transport", "builder"] }
 aws-config = "1"

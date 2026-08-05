@@ -66,6 +66,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
       S3_BUCKET: ${S3_BUCKET:-medoc}
+      S3_BUCKET_BACKUP: ${S3_BUCKET_BACKUP:-medoc-backup}
     # No `mc anonymous set download`: the bucket is private. Reads go through
     # the backend's authenticated /attachments/download and /auth/avatars/download
     # endpoints, which check the caller's permission before handing back a
@@ -74,7 +75,8 @@ services:
       sh -c "
       mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
       mc mb -p local/$$S3_BUCKET || true &&
-      echo 'bucket ready'
+      mc mb -p local/$$S3_BUCKET_BACKUP || true &&
+      echo 'buckets ready'
       "
 
   mailpit:
@@ -137,8 +139,10 @@ services:
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
       JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-1209600}
       OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
+      AI_ENCRYPTION_KEY: ${AI_ENCRYPTION_KEY}
       RUST_LOG: ${RUST_LOG:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://localhost}
+      PRODUCT_NAME: ${PRODUCT_NAME:-MeDoc}
     # No host port: all real traffic reaches the backend through nginx.
     # Publishing this directly would also let a client bypass nginx's
     # X-Forwarded-For and spoof the rate limiter's per-client key (see
@@ -161,6 +165,36 @@ services:
       timeout: 5s
       retries: 10
 
+  # Nightly `pg_dump | gzip` → the backup bucket in MinIO. Not on the request
+  # path and reached by nothing else, so no published port and no healthcheck —
+  # it's a crond that sleeps until $BACKUP_CRON_SCHEDULE. Run it on demand with
+  # `docker compose exec db-backup backup-db.sh`.
+  db-backup:
+    build:
+      # Context is ./scripts (not ./scripts/backup) so the Dockerfile can copy
+      # scripts/backup-db.sh, which lives with the other operator scripts.
+      context: ./scripts
+      dockerfile: backup/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Same container-internal-address rule as `backend` above: postgres:5432
+      # and minio:9000, never the *_HOST_PORT values .env sets for host access.
+      DATABASE_URL: postgres://${POSTGRES_USER:-medoc}:${POSTGRES_PASSWORD:-medoc}@postgres:5432/${POSTGRES_DB:-medoc}
+      POSTGRES_DB: ${POSTGRES_DB:-medoc}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin123}
+      S3_BUCKET_BACKUP: ${S3_BUCKET_BACKUP:-medoc-backup}
+      BACKUP_CRON_SCHEDULE: ${BACKUP_CRON_SCHEDULE:-0 3 * * *}
+      # Empty disables pruning entirely — backups then accumulate forever.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -179,6 +213,7 @@ services:
       # host-port var the backend's S3_PUBLIC_ENDPOINT already uses, so both
       # sides move together automatically.
       NUXT_PUBLIC_MINIO_BASE: ${NUXT_PUBLIC_MINIO_BASE:-http://localhost:${MINIO_API_HOST_PORT:-9010}/${S3_BUCKET:-medoc}}
+      NUXT_PUBLIC_PRODUCT_NAME: ${PRODUCT_NAME:-MeDoc}
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:
