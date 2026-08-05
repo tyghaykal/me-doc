@@ -19,9 +19,16 @@ fn get(uri: &str) -> Request<Body> {
 
 /// With no Google client configured, starting the flow is refused with a
 /// clear 503 — the frontend hides the button when the backend says so.
+/// Explicitly clears the config regardless of ambient env so the test is
+/// deterministic on machines where Google IS configured.
 #[sqlx::test]
 async fn google_login_fails_closed_when_not_configured(pool: PgPool) {
-    let state = test_state(pool).await;
+    let mut state = test_state(pool).await;
+    let mut cfg = (*state.config).clone();
+    cfg.google_client_id = None;
+    cfg.google_client_secret = None;
+    cfg.google_redirect_uri = None;
+    state.config = Arc::new(cfg);
     let app = me_doc_backend::build_app(state);
 
     let (status, _, body) = send(&app, get("/auth/google/login")).await;

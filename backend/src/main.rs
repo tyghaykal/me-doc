@@ -27,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
         config.smtp_port,
         &config.smtp_from,
         &config.product_name,
+        &config.frontend_origin,
     )?;
     let s3 = storage::build_client(&config);
     let s3_presign = storage::build_presign_client(&config);

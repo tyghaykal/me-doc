@@ -2,6 +2,12 @@
 const authStore = useAuthStore()
 const authReady = useAuthReady()
 const { public: { productName } } = useRuntimeConfig()
+
+// A plain NuxtLink to "/" does nothing when you're already on "/" — Nuxt skips
+// the navigation and the browser keeps its scroll position. Scroll explicitly.
+function backToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
 </script>
 
 <template>
@@ -52,9 +58,13 @@ const { public: { productName } } = useRuntimeConfig()
         <p class="text-sm text-neutral-500 dark:text-neutral-400">
           &copy; {{ new Date().getFullYear() }} {{ productName }}. All rights reserved.
         </p>
-        <NuxtLink to="/" class="text-xs text-neutral-400 transition-colors hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300">
+        <button
+          type="button"
+          class="cursor-pointer text-xs text-neutral-400 transition-colors hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
+          @click="backToTop"
+        >
           Back to top ↑
-        </NuxtLink>
+        </button>
       </div>
     </div>
   </footer>

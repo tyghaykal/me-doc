@@ -4,7 +4,7 @@
 //! which bounces to Google, and Google redirects back to `/auth/google/callback`.
 //! The callback exchanges the code, upserts the user by `google_sub`, issues
 //! the same refresh-token session the OTP flow uses, and redirects the browser
-//! to the frontend's `/login/google` page with the cookie set.
+//! to the frontend's `/oauth/google/callback` page with the cookie set.
 //!
 //! The flow is GET-based (OAuth redirects can't carry POST bodies), so these
 //! routes live in `auth::router()` — the non-sensitive router — not
@@ -127,7 +127,18 @@ pub async fn callback(
     ))?;
     let email = email.trim().to_lowercase();
 
-    let user_id = upsert_google_user(&state, &userinfo.sub, &email, userinfo.name.as_deref()).await?;
+    let (user_id, first_google_login, is_new_user) =
+        upsert_google_user(&state, &userinfo.sub, &email, userinfo.name.as_deref()).await?;
+
+    // Welcome email only on the FIRST Google login — a returning Google user
+    // (google_sub already set before this callback) shouldn't be re-greeted on
+    // every sign-in. Failures are logged but not fatal: the auth session must
+    // succeed even if the welcome email bounces.
+    if first_google_login {
+        if let Err(err) = state.email.send_welcome(&email, is_new_user).await {
+            tracing::warn!(?err, email = %email, "failed to send welcome email");
+        }
+    }
 
     // Reconcile pages shared to this email before the account existed.
     sqlx::query(
@@ -153,8 +164,13 @@ pub async fn callback(
     // Point the browser at the frontend callback page; the refresh_token cookie
     // rides along automatically (same-site). That page calls /auth/refresh with
     // the cookie to grab the access token and finish.
+    //
+    // NOTE: this must NOT live under /login (e.g. /login/google): Nuxt 4 treats
+    // pages/login/google.vue as a child of pages/login.vue, which has no
+    // <NuxtPage> outlet, so the route silently renders login.vue instead.
+    // /oauth/google/callback is a top-level route that renders standalone.
     let origin = state.config.frontend_origin.trim_end_matches('/');
-    let redirect = format!("{origin}/login/google");
+    let redirect = format!("{origin}/oauth/google/callback");
     Ok(Redirect::temporary(&redirect))
 }
 
@@ -222,13 +238,20 @@ async fn exchange_code(
 }
 
 /// Inserts the Google user if `google_sub` is new, or re-links an existing
-/// account (matched by verified email) to Google. Returns the user id.
+/// account (matched by verified email) to Google.
+///
+/// Returns `(user_id, first_google_login, is_new_user)`:
+/// - `first_google_login` is true only when the user did NOT already have
+///   `google_sub` before this callback — the single moment the welcome email
+///   should fire. A returning Google user (google_sub already set) gets false.
+/// - `is_new_user` is true only when a brand-new account row was created —
+///   drives the "Welcome to" vs "Welcome back" copy.
 async fn upsert_google_user(
     state: &AppState,
     sub: &str,
     email: &str,
     name: Option<&str>,
-) -> Result<Uuid, AuthError> {
+) -> Result<(Uuid, bool, bool), AuthError> {
     // Match by google_sub first (stable, the user's identity on Google).
     if let Some((id,)) = sqlx::query_as::<_, (Uuid,)>("select id from users where google_sub = $1")
         .bind(sub)
@@ -242,7 +265,8 @@ async fn upsert_google_user(
                 .execute(&state.db)
                 .await?;
         }
-        return Ok(id);
+        // Already had Google linked — this is a repeat login, not a first one.
+        return Ok((id, false, false));
     }
 
     // Existing verified account with this email — link it to Google.
@@ -261,7 +285,8 @@ async fn upsert_google_user(
         .bind(name)
         .execute(&state.db)
         .await?;
-        return Ok(id);
+        // First time this account used Google.
+        return Ok((id, true, false));
     }
 
     // Brand-new account (or an unverified account with this email — adopt it:
@@ -281,5 +306,6 @@ async fn upsert_google_user(
     .fetch_one(&state.db)
     .await?;
 
-    Ok(id)
+    // Brand-new Google account.
+    Ok((id, true, true))
 }

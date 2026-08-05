@@ -121,6 +121,7 @@ pub async fn test_state(pool: PgPool) -> AppState {
         config.smtp_port,
         &config.smtp_from,
         &config.product_name,
+        &config.frontend_origin,
     )
     .unwrap();
     let s3 = storage::build_client(&config);

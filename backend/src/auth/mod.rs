@@ -138,7 +138,9 @@ async fn register(
     .await?;
 
     let code = otp::issue_otp(&state.redis, "register", &email, state.config.otp_ttl_seconds).await?;
-    state.email.send_otp(&email, "register", &code).await?;
+    // Registration is the only OTP that also carries the welcome message — the
+    // user is brand new and this is the first email they'll read.
+    state.email.send_register_otp_with_welcome(&email, &code).await?;
 
     Ok(Json(json!({ "message": "verification code sent" })))
 }
